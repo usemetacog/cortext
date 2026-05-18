@@ -1,10 +1,10 @@
 # cortext
 
-Metacognition for your Claude Code prompts.
+Reflection for your Claude Code prompts.
 
 ```
 ╔════════════════════════════════════════════════════════════╗
-║ cortext  ·  metacognition for your claude code prompts     ║
+║ cortext  ·  reflection for your claude code prompts        ║
 ╠════════════════════════════════════════════════════════════╣
 ║ OVERVIEW                                                   ║
 ║ 30 days  ·  45 sessions  ·  481 prompts                    ║
