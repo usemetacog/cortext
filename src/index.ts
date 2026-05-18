@@ -2,6 +2,7 @@ import { readProjects } from './reader';
 import { analyze } from './analyzer';
 import { render } from './renderer';
 import { analyzePrompts } from './suggester';
+import { runInteractive } from './interactive';
 
 const USAGE = `
 Usage: npx cortext [options]
@@ -9,18 +10,21 @@ Usage: npx cortext [options]
 Options:
   --days <n>     Analyze last n days (default: 30)
   --analyze      AI-powered prompt improvement (needs ANTHROPIC_API_KEY)
+  --interactive  Chat with Claude about your stats (needs ANTHROPIC_API_KEY)
   --help         Show this help
 
 Examples:
   npx cortext
   npx cortext --days 7
   npx cortext --analyze
+  npx cortext --interactive
 `.trim();
 
-function parseArgs(argv: string[]): { days: number; analyze: boolean; help: boolean } {
+function parseArgs(argv: string[]): { days: number; analyze: boolean; interactive: boolean; help: boolean } {
   const args = argv.slice(2);
   let days = 30;
   let analyze = false;
+  let interactive = false;
   let help = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -30,16 +34,18 @@ function parseArgs(argv: string[]): { days: number; analyze: boolean; help: bool
       i++;
     } else if (args[i] === '--analyze') {
       analyze = true;
+    } else if (args[i] === '--interactive') {
+      interactive = true;
     } else if (args[i] === '--help' || args[i] === '-h') {
       help = true;
     }
   }
 
-  return { days, analyze, help };
+  return { days, analyze, interactive, help };
 }
 
 async function main(): Promise<void> {
-  const { days, analyze: shouldAnalyze, help } = parseArgs(process.argv);
+  const { days, analyze: shouldAnalyze, interactive: shouldInteract, help } = parseArgs(process.argv);
 
   if (help) {
     console.log(USAGE);
@@ -65,6 +71,10 @@ async function main(): Promise<void> {
     } else {
       await analyzePrompts(result.worstPrompts);
     }
+  }
+
+  if (shouldInteract) {
+    await runInteractive(result);
   }
 }
 
