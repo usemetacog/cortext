@@ -1,6 +1,6 @@
 {
   "name": "cortext",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Metacognition for your Claude Code prompts",
   "keywords": [
     "claude",
