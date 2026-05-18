@@ -54,6 +54,8 @@ Then type `/cortext` in any Claude Code conversation to get your usage report in
 npx cortext                   # last 30 days
 npx cortext --days 7          # last 7 days
 npx cortext --analyze         # + AI prompt improvement (needs ANTHROPIC_API_KEY)
+npx cortext review            # AI coaching report (needs ANTHROPIC_API_KEY + goal set)
+npx cortext review --force    # regenerate review, bypassing 7-day cooldown
 npx cortext --help
 ```
 
@@ -82,6 +84,19 @@ npx cortext --analyze
 ```
 
 Picks your 5 most vague or corrected prompts, sends them to `claude-sonnet-4-6`, and returns a diagnosis + improved version for each one.
+
+## Coaching reviews
+
+```bash
+npx cortext goal    # set your goal/persona first
+npx cortext review  # get a coaching report against that goal
+```
+
+Reviews are saved to `~/.cortext/reviews.json`. Running `npx cortext review` within 7 days of the last report shows the cached report instead of regenerating — so you have time to act on the feedback before measuring again. Use `--force` to bypass the cooldown:
+
+```bash
+npx cortext review --force
+```
 
 ## Data source
 
