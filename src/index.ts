@@ -4,11 +4,13 @@ import chalk from 'chalk';
 import { readProjects } from './reader';
 import { analyze } from './analyzer';
 import { render, renderCoachReport, renderGoalStatus } from './renderer';
+import type { WorstPromptData } from './renderer';
 import { analyzePrompts } from './suggester';
 import { runInteractive } from './interactive';
 import { ARCHETYPES, loadGoal, saveGoal } from './goals';
 import { runCoach } from './coach';
 import { saveReview, loadLatestReview, daysSinceLastReview, isInCooldown, COOLDOWN_DAYS } from './reviews';
+import { generateRewrite, heuristicDiagnosis } from './rewriter';
 import type { Goal, GoalRubric } from './types';
 
 const USAGE = `
@@ -273,7 +275,16 @@ async function main(): Promise<void> {
   }
 
   const result = analyze(projects, days);
-  render(result);
+
+  let worstPromptData: WorstPromptData | undefined;
+  if (result.worstPrompts.length > 0) {
+    const worst = result.worstPrompts[0];
+    const heuristic = heuristicDiagnosis(worst);
+    const rewrite = await generateRewrite(worst);
+    worstPromptData = { prompt: worst, rewrite, heuristic };
+  }
+
+  render(result, worstPromptData);
 
   // show active goal hint if set
   const goal = loadGoal();

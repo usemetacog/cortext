@@ -1,5 +1,11 @@
 import chalk from 'chalk';
-import type { AnalysisResult, CoachReport, DailyUsage, Goal, PromptCategory } from './types';
+import type { AnalysisResult, CoachReport, DailyUsage, Goal, PromptCategory, RewriteResult, UserPrompt } from './types';
+
+export interface WorstPromptData {
+  prompt: UserPrompt;
+  rewrite: RewriteResult | null;
+  heuristic: string;
+}
 
 const WIDTH = 62;
 const INNER = WIDTH - 4; // inside the box borders + 2 spaces padding
@@ -74,7 +80,7 @@ const CATEGORY_ORDER: PromptCategory[] = [
   'fix', 'implement', 'explain', 'refactor', 'question', 'vague', 'other',
 ];
 
-export function render(result: AnalysisResult): void {
+export function render(result: AnalysisResult, worstPromptData?: WorstPromptData): void {
   const lines: string[] = [];
 
   lines.push(top());
@@ -183,6 +189,45 @@ export function render(result: AnalysisResult): void {
       const costStr = formatCost(ps.cost).padStart(7);
       const b = bar(ps.cost / maxProjectCost, BAR_W);
       lines.push(line(`${nameStr}  ${costStr}  ${b}`));
+    }
+  }
+
+  // Worst prompt rewrite section
+  if (worstPromptData) {
+    const { prompt, rewrite, heuristic } = worstPromptData;
+    lines.push(divider());
+    lines.push(sectionLabel('WORST PROMPT THIS WEEK'));
+    lines.push(blank());
+
+    const ts = prompt.timestamp.toLocaleString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    });
+    lines.push(line(chalk.dim(`${ts}  ·  ${prompt.projectName}`)));
+    lines.push(blank());
+
+    for (const l of wrapText('"' + prompt.text + '"', INNER - 2)) {
+      lines.push(line(chalk.white(l)));
+    }
+    lines.push(blank());
+
+    if (rewrite) {
+      lines.push(line(chalk.dim('Why it failed:')));
+      for (const l of wrapText(rewrite.diagnosis, INNER - 4)) {
+        lines.push(line('  ' + chalk.yellow(l)));
+      }
+      lines.push(blank());
+      lines.push(line(chalk.dim('How it should read:')));
+      for (const l of wrapText(rewrite.rewrite, INNER - 4)) {
+        lines.push(line('  ' + chalk.cyan(l)));
+      }
+    } else {
+      lines.push(line(chalk.dim('Why it failed:')));
+      for (const l of wrapText(heuristic, INNER - 4)) {
+        lines.push(line('  ' + chalk.yellow(l)));
+      }
+      lines.push(blank());
+      lines.push(line(chalk.dim('Set ANTHROPIC_API_KEY to get an AI-powered rewrite.')));
     }
   }
 

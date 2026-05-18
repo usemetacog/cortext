@@ -102,6 +102,13 @@ export interface AnalysisResult {
   medianFirstMessageWords: number;
 }
 
+// ── Worst prompt rewrite ───────────────────────────────────────
+
+export interface RewriteResult {
+  diagnosis: string;
+  rewrite: string;
+}
+
 // ── Goal system ────────────────────────────────────────────────
 
 export interface GoalRubric {
