@@ -29,19 +29,37 @@ Metacognition for your Claude Code prompts.
 
 ## Install
 
-Zero install — run directly:
+**Option 1 — npx (zero install):**
 
 ```bash
 npx cortext
 ```
 
+**Option 2 — Claude Code skill:**
+
+If you use Claude Code, you can run cortext as a `/cortext` slash command directly in your session. Copy the skill file into your Claude skills directory:
+
+```bash
+mkdir -p ~/.claude/skills/cortext
+curl -o ~/.claude/skills/cortext/SKILL.md \
+  https://raw.githubusercontent.com/usemetacog/cortext/main/skill/SKILL.md
+```
+
+Then type `/cortext` in any Claude Code conversation to get your usage report inline.
+
 ## Usage
 
+**CLI:**
 ```bash
 npx cortext                   # last 30 days
 npx cortext --days 7          # last 7 days
 npx cortext --analyze         # + AI prompt improvement (needs ANTHROPIC_API_KEY)
 npx cortext --help
+```
+
+**Claude Code skill:**
+```
+/cortext
 ```
 
 ## What it shows
@@ -74,7 +92,7 @@ Reads from `~/.claude/projects/` — the local session store that Claude Code wr
 Open source under MIT. PRs welcome.
 
 ```bash
-git clone https://github.com/yourname/cortext
+git clone https://github.com/usemetacog/cortext
 cd cortext
 npm install
 npm run dev      # runs src/index.ts directly via tsx
