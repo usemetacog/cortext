@@ -1,33 +1,209 @@
+import * as readline from 'readline';
+import Anthropic from '@anthropic-ai/sdk';
+import chalk from 'chalk';
 import { readProjects } from './reader';
 import { analyze } from './analyzer';
-import { render } from './renderer';
+import { render, renderCoachReport, renderGoalStatus } from './renderer';
 import { analyzePrompts } from './suggester';
 import { runInteractive } from './interactive';
+import { ARCHETYPES, loadGoal, saveGoal } from './goals';
+import { runCoach } from './coach';
+import type { Goal, GoalRubric } from './types';
 
 const USAGE = `
-Usage: npx cortext [options]
+Usage: npx cortext [command] [options]
+
+Commands:
+  goal              Set a coaching goal (interactive wizard)
+  review            Run a coaching critique against your active goal
 
 Options:
-  --days <n>     Analyze last n days (default: 30)
-  --analyze      AI-powered prompt improvement (needs ANTHROPIC_API_KEY)
-  --interactive  Chat with Claude about your stats (needs ANTHROPIC_API_KEY)
-  --help         Show this help
+  --days <n>        Analyze last n days (default: 30)
+  --analyze         AI-powered prompt improvement (needs ANTHROPIC_API_KEY)
+  --interactive     Chat with Claude about your stats (needs ANTHROPIC_API_KEY)
+  --help            Show this help
 
 Examples:
   npx cortext
-  npx cortext --days 7
+  npx cortext goal
+  npx cortext review
+  npx cortext review --days 7
   npx cortext --analyze
-  npx cortext --interactive
 `.trim();
 
-function parseArgs(argv: string[]): { days: number; analyze: boolean; interactive: boolean; help: boolean } {
+function ask(rl: readline.Interface, prompt: string): Promise<string> {
+  return new Promise(resolve => rl.question(prompt, resolve));
+}
+
+async function deriveCustomRubric(description: string): Promise<GoalRubric> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    // Fallback rubric if no API key
+    return {
+      specificity: `Prompts are specific and actionable toward: ${description}`,
+      ownership: 'Takes clear ownership of direction; pushes back when output misses the mark.',
+      toolDiversity: 'Leverages the full range of available tools rather than defaulting to text-only.',
+      frontloading: 'Opens sessions with full context so Claude can act autonomously.',
+      efficiency: 'Achieves the goal with minimal back-and-forth and low correction rate.',
+    };
+  }
+
+  const client = new Anthropic({ apiKey });
+  try {
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 600,
+      system: `You generate a prompting rubric for a user who wants to prompt Claude Code like a specific persona or achieve a specific goal.
+Respond as raw JSON only. No markdown fences. Schema:
+{
+  "specificity": "one sentence describing what specificity looks like for this persona",
+  "ownership": "one sentence describing ownership behavior",
+  "toolDiversity": "one sentence describing tool usage expectations",
+  "frontloading": "one sentence describing how context is set upfront",
+  "efficiency": "one sentence describing efficiency expectations"
+}`,
+      messages: [{
+        role: 'user',
+        content: `The user's goal: "${description}"`,
+      }],
+    });
+    const text = response.content.find(b => b.type === 'text')?.text ?? '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('no JSON');
+    return JSON.parse(jsonMatch[0]) as GoalRubric;
+  } catch {
+    return {
+      specificity: `Prompts are specific and actionable toward: ${description}`,
+      ownership: 'Takes clear ownership of direction; pushes back when output misses the mark.',
+      toolDiversity: 'Leverages the full range of available tools rather than defaulting to text-only.',
+      frontloading: 'Opens sessions with full context so Claude can act autonomously.',
+      efficiency: 'Achieves the goal with minimal back-and-forth and low correction rate.',
+    };
+  }
+}
+
+async function runGoalWizard(): Promise<void> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  rl.on('SIGINT', () => { console.log('\n'); rl.close(); process.exit(0); });
+
+  console.log('');
+  console.log(chalk.bold.white('Set a coaching goal'));
+  console.log(chalk.dim('cortext will score your prompts against this persona and give blunt feedback.'));
+  console.log('');
+
+  console.log(chalk.dim('Archetypes:'));
+  for (let i = 0; i < ARCHETYPES.length; i++) {
+    const a = ARCHETYPES[i];
+    console.log(`  ${chalk.white(String(i + 1))}. ${chalk.bold(a.label)}  ${chalk.dim(a.tagline)}`);
+  }
+  console.log(`  ${chalk.white(String(ARCHETYPES.length + 1))}. ${chalk.bold('Custom')}  ${chalk.dim('Define your own')}`);
+  console.log('');
+
+  let choiceStr: string;
+  while (true) {
+    choiceStr = (await ask(rl, chalk.cyan(`Pick 1–${ARCHETYPES.length + 1}: `))).trim();
+    const n = parseInt(choiceStr, 10);
+    if (!isNaN(n) && n >= 1 && n <= ARCHETYPES.length + 1) break;
+    console.log(chalk.dim(`  Enter a number between 1 and ${ARCHETYPES.length + 1}`));
+  }
+
+  const choiceIdx = parseInt(choiceStr, 10) - 1;
+  const isCustom = choiceIdx === ARCHETYPES.length;
+
+  let goal: Goal;
+
+  if (isCustom) {
+    const description = (await ask(rl, chalk.cyan('Describe your goal (e.g. "prompt like Steve Jobs"): '))).trim();
+    if (!description) {
+      console.log(chalk.dim('\nNo input — goal not saved.\n'));
+      rl.close();
+      return;
+    }
+    console.log(chalk.dim('\nDeriving rubric…'));
+    const rubric = await deriveCustomRubric(description);
+    goal = {
+      archetypeId: 'custom',
+      label: description,
+      rubric,
+      createdAt: new Date().toISOString().slice(0, 10),
+    };
+  } else {
+    const archetype = ARCHETYPES[choiceIdx];
+    const customization = (
+      await ask(rl, chalk.cyan(`Optional — add context about yourself (or press Enter to skip): `))
+    ).trim();
+    goal = {
+      archetypeId: archetype.id,
+      label: archetype.label,
+      customization: customization || undefined,
+      rubric: archetype.rubric,
+      createdAt: new Date().toISOString().slice(0, 10),
+    };
+  }
+
+  saveGoal(goal);
+  console.log('');
+  console.log(chalk.green('✓') + ' Goal set: ' + chalk.white.bold(goal.label));
+  if (goal.customization) console.log(chalk.dim('  "' + goal.customization + '"'));
+  console.log(chalk.dim('Run ') + chalk.white('npx cortext review') + chalk.dim(' to get your first coaching report.'));
+  console.log('');
+
+  rl.close();
+}
+
+async function runReview(days: number): Promise<void> {
+  const goal = loadGoal();
+  if (!goal) {
+    console.log('');
+    console.log(chalk.yellow('No active goal set.'));
+    console.log(chalk.dim('Run ') + chalk.white('npx cortext goal') + chalk.dim(' to set one first.'));
+    console.log('');
+    return;
+  }
+
+  console.log(chalk.dim(`\nRunning coaching report for "${goal.label}" over the last ${days} days…\n`));
+
+  const projects = readProjects(days);
+  if (projects.length === 0) {
+    console.error('\nNo Claude Code session data found in ~/.claude/projects/\n');
+    process.exit(1);
+  }
+
+  const result = analyze(projects, days);
+  const report = await runCoach(result, goal);
+  if (report) {
+    renderCoachReport(report, goal, days);
+  }
+}
+
+interface ParsedArgs {
+  command: 'dashboard' | 'goal' | 'review';
+  days: number;
+  analyze: boolean;
+  interactive: boolean;
+  help: boolean;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
+  let command: ParsedArgs['command'] = 'dashboard';
   let days = 30;
   let analyze = false;
   let interactive = false;
   let help = false;
 
-  for (let i = 0; i < args.length; i++) {
+  let i = 0;
+
+  // check for subcommand first
+  if (args[0] === 'goal') {
+    command = 'goal';
+    i = 1;
+  } else if (args[0] === 'review') {
+    command = 'review';
+    i = 1;
+  }
+
+  for (; i < args.length; i++) {
     if (args[i] === '--days' && args[i + 1]) {
       const n = parseInt(args[i + 1], 10);
       if (!isNaN(n) && n > 0) days = n;
@@ -41,17 +217,28 @@ function parseArgs(argv: string[]): { days: number; analyze: boolean; interactiv
     }
   }
 
-  return { days, analyze, interactive, help };
+  return { command, days, analyze, interactive, help };
 }
 
 async function main(): Promise<void> {
-  const { days, analyze: shouldAnalyze, interactive: shouldInteract, help } = parseArgs(process.argv);
+  const { command, days, analyze: shouldAnalyze, interactive: shouldInteract, help } = parseArgs(process.argv);
 
   if (help) {
     console.log(USAGE);
     return;
   }
 
+  if (command === 'goal') {
+    await runGoalWizard();
+    return;
+  }
+
+  if (command === 'review') {
+    await runReview(days);
+    return;
+  }
+
+  // default: dashboard
   const projects = readProjects(days);
 
   if (projects.length === 0) {
@@ -64,6 +251,12 @@ async function main(): Promise<void> {
 
   const result = analyze(projects, days);
   render(result);
+
+  // show active goal hint if set
+  const goal = loadGoal();
+  if (goal) {
+    renderGoalStatus(goal);
+  }
 
   if (shouldAnalyze) {
     if (result.worstPrompts.length === 0) {

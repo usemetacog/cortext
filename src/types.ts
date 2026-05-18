@@ -8,6 +8,7 @@ export interface Usage {
 export interface ContentBlock {
   type: string;
   text?: string;
+  name?: string; // tool name for type === 'tool_use'
 }
 
 export interface RawEntry {
@@ -93,4 +94,61 @@ export interface AnalysisResult {
   projectStats: ProjectStats[];
   worstPrompts: UserPrompt[];
   daysAnalyzed: number;
+  // tool & skill signals
+  toolsUsed: string[];
+  toolDiversity: number;
+  totalToolCalls: number;
+  slashCommandCount: number;
+  medianFirstMessageWords: number;
+}
+
+// ── Goal system ────────────────────────────────────────────────
+
+export interface GoalRubric {
+  specificity: string;
+  ownership: string;
+  toolDiversity: string;
+  frontloading: string;
+  efficiency: string;
+}
+
+export interface GoalArchetype {
+  id: string;
+  label: string;
+  tagline: string;
+  rubric: GoalRubric;
+}
+
+export interface Goal {
+  archetypeId: string;
+  label: string;
+  customization?: string;
+  rubric: GoalRubric;
+  createdAt: string;
+}
+
+// ── Coach report ───────────────────────────────────────────────
+
+export interface SignalScore {
+  score: number; // 1-10
+  note: string;
+}
+
+export interface CoachReport {
+  grade: string;
+  gradeReason: string;
+  signalScores: {
+    specificity: SignalScore;
+    ownership: SignalScore;
+    toolDiversity: SignalScore;
+    frontloading: SignalScore;
+    efficiency: SignalScore;
+  };
+  worstMoments: Array<{
+    original: string;
+    diagnosis: string;
+    better: string;
+  }>;
+  whatIsWorking: string;
+  honestGap: string;
 }

@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import type { AnalysisResult, DailyUsage, PromptCategory } from './types';
+import type { AnalysisResult, CoachReport, DailyUsage, Goal, PromptCategory } from './types';
 
 const WIDTH = 62;
 const INNER = WIDTH - 4; // inside the box borders + 2 spaces padding
@@ -188,6 +188,7 @@ export function render(result: AnalysisResult): void {
 
   lines.push(divider());
   lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext --analyze') + chalk.dim('  for AI prompt improvement')));
+  lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext goal') + chalk.dim('       to set a coaching goal')));
   lines.push(bottom());
 
   console.log(lines.join('\n'));
@@ -247,4 +248,123 @@ function formatDate(dateStr: string): string {
   const [, month, day] = dateStr.split('-');
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return `${months[parseInt(month) - 1]} ${day}`;
+}
+
+// ── Coaching report renderer ───────────────────────────────────
+
+function gradeColor(grade: string): (s: string) => string {
+  const letter = grade[0]?.toUpperCase() ?? 'C';
+  if (letter === 'A') return chalk.green.bold;
+  if (letter === 'B') return chalk.cyan.bold;
+  if (letter === 'C') return chalk.yellow.bold;
+  return chalk.red.bold;
+}
+
+function scoreBar(score: number): string {
+  const filled = Math.round((score / 10) * 10);
+  const empty = 10 - filled;
+  let color: (s: string) => string;
+  if (score >= 7) color = chalk.green;
+  else if (score >= 4) color = chalk.yellow;
+  else color = chalk.red;
+  return color('█'.repeat(filled)) + chalk.dim('░'.repeat(empty));
+}
+
+export function renderCoachReport(report: CoachReport, goal: Goal, days: number): void {
+  const out: string[] = [];
+
+  out.push('');
+  out.push(chalk.dim('╔' + '═'.repeat(WIDTH - 2) + '╗'));
+  out.push(line(
+    chalk.bold.magenta('COACHING REPORT') +
+    chalk.dim('  ·  ') +
+    chalk.white(goal.label) +
+    chalk.dim(`  ·  last ${days} days`)
+  ));
+  out.push(divider());
+
+  // Grade
+  const coloredGrade = gradeColor(report.grade)(report.grade);
+  out.push(line(chalk.bold('OVERALL GRADE: ') + coloredGrade));
+  for (const l of wrapText(report.gradeReason, INNER - 2)) {
+    out.push(line(chalk.dim('  ' + l)));
+  }
+  out.push(blank());
+  out.push(divider());
+
+  // Signal scores
+  out.push(line(chalk.bold.cyan('SIGNAL SCORES') + chalk.dim(`  (vs. ${goal.label} rubric)`)));
+  out.push(blank());
+
+  const signals: Array<[string, keyof CoachReport['signalScores']]> = [
+    ['Specificity  ', 'specificity'],
+    ['Ownership    ', 'ownership'],
+    ['Tool diversity', 'toolDiversity'],
+    ['Front-loading', 'frontloading'],
+    ['Efficiency   ', 'efficiency'],
+  ];
+
+  for (const [label, key] of signals) {
+    const { score, note } = report.signalScores[key];
+    const b = scoreBar(score);
+    const scoreStr = `${score}/10`;
+    out.push(line(`${chalk.dim(label)}  ${b}  ${scoreStr.padStart(4)}`));
+    for (const l of wrapText(note, INNER - 4)) {
+      out.push(line(chalk.dim('    ' + l)));
+    }
+  }
+
+  out.push(divider());
+
+  // Worst moments
+  if (report.worstMoments.length > 0) {
+    out.push(line(chalk.bold.cyan('THE MOMENTS YOU FELL SHORT')));
+    out.push(blank());
+    for (let i = 0; i < report.worstMoments.length; i++) {
+      const { original, diagnosis, better } = report.worstMoments[i];
+      const origTrunc = original.length > INNER - 6 ? original.slice(0, INNER - 9) + '...' : original;
+      out.push(line(chalk.dim(`#${i + 1}`) + '  ' + chalk.white(`"${origTrunc}"`)));
+      for (const l of wrapText(diagnosis, INNER - 4)) {
+        out.push(line('    ' + chalk.yellow(l)));
+      }
+      out.push(line(chalk.dim('    Better:')));
+      for (const l of wrapText(better, INNER - 6)) {
+        out.push(line('      ' + chalk.cyan(l)));
+      }
+      if (i < report.worstMoments.length - 1) out.push(blank());
+    }
+    out.push(divider());
+  }
+
+  // What's working
+  out.push(line(chalk.bold.cyan("WHAT'S WORKING")));
+  for (const l of wrapText(report.whatIsWorking, INNER - 2)) {
+    out.push(line('  ' + chalk.white(l)));
+  }
+  out.push(divider());
+
+  // Honest gap
+  out.push(line(chalk.bold.red('THE HONEST GAP')));
+  for (const l of wrapText(report.honestGap, INNER - 2)) {
+    out.push(line('  ' + chalk.white(l)));
+  }
+
+  out.push(chalk.dim('╚' + '═'.repeat(WIDTH - 2) + '╝'));
+  out.push('');
+
+  console.log(out.join('\n'));
+}
+
+export function renderGoalStatus(goal: Goal | null): void {
+  console.log('');
+  if (!goal) {
+    console.log(chalk.dim('No active goal. Run ') + chalk.white('npx cortext goal') + chalk.dim(' to set one.'));
+  } else {
+    console.log(chalk.dim('Active goal: ') + chalk.white.bold(goal.label) + chalk.dim(` (set ${goal.createdAt})`));
+    if (goal.customization) {
+      console.log(chalk.dim('  "' + goal.customization + '"'));
+    }
+    console.log(chalk.dim('Run ') + chalk.white('npx cortext review') + chalk.dim(' to get your coaching report.'));
+  }
+  console.log('');
 }

@@ -84,11 +84,16 @@ function vagueScore(text: string): number {
   return score;
 }
 
+const SLASH_CMD = /^\/[a-zA-Z][a-zA-Z-]*/;
+
 export function analyze(projects: ProjectData[], days: number): AnalysisResult {
   const dailyMap = new Map<string, DailyUsage>();
   const projectStatsMap = new Map<string, ProjectStats>();
   const allPrompts: UserPrompt[] = [];
   const sessions = new Map<string, SessionStats>();
+  const allToolCalls: string[] = [];
+  const firstMessageWordCounts: number[] = [];
+  let slashCommandCount = 0;
 
   for (const project of projects) {
     const sessionEntries = new Map<string, RawEntry[]>();
@@ -125,6 +130,8 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
       // Build ordered message sequence for correction detection
       const messageSequence: Array<{ role: 'user' | 'assistant'; text: string; entry: RawEntry }> = [];
 
+      let sessionFirstUserMessageWords: number | null = null;
+
       for (const entry of sorted) {
         if (entry.type === 'assistant' && entry.message?.usage) {
           const usage = entry.message.usage;
@@ -135,6 +142,15 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           sessionStat.totalCacheReadTokens += usage.cache_read_input_tokens || 0;
           sessionStat.totalCacheCreationTokens += usage.cache_creation_input_tokens || 0;
           sessionStat.costUSD += computeCost(model, usage);
+
+          // collect tool names from tool_use blocks
+          if (Array.isArray(entry.message?.content)) {
+            for (const block of entry.message.content as Array<{ type: string; name?: string }>) {
+              if (block.type === 'tool_use' && block.name) {
+                allToolCalls.push(block.name);
+              }
+            }
+          }
 
           const date = entry.timestamp!.slice(0, 10);
           const daily = dailyMap.get(date) ?? {
@@ -157,6 +173,12 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           if (text) {
             messageSequence.push({ role: 'user', text, entry });
             sessionStat.promptCount++;
+            if (sessionFirstUserMessageWords === null) {
+              sessionFirstUserMessageWords = text.split(/\s+/).length;
+            }
+            if (SLASH_CMD.test(text.trim())) {
+              slashCommandCount++;
+            }
           }
         }
       }
@@ -198,6 +220,10 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           vagueScore: vagueScore(text),
           followedByCorrection: followedByCorrection || correctedAfterResponse,
         });
+      }
+
+      if (sessionFirstUserMessageWords !== null) {
+        firstMessageWordCounts.push(sessionFirstUserMessageWords);
       }
 
       if (sorted.length > 0) {
@@ -294,6 +320,16 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 8);
 
+  const toolsUsed = [...new Set(allToolCalls)].sort();
+  const toolDiversity = toolsUsed.length;
+  const totalToolCalls = allToolCalls.length;
+
+  const sortedFirstMsgWords = [...firstMessageWordCounts].sort((a, b) => a - b);
+  const medianFirstMessageWords =
+    sortedFirstMsgWords.length > 0
+      ? sortedFirstMsgWords[Math.floor(sortedFirstMsgWords.length / 2)]
+      : 0;
+
   return {
     totalSessions: sessions.size,
     totalPrompts: allPrompts.length,
@@ -310,5 +346,10 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     projectStats,
     worstPrompts,
     daysAnalyzed: days,
+    toolsUsed,
+    toolDiversity,
+    totalToolCalls,
+    slashCommandCount,
+    medianFirstMessageWords,
   };
 }
