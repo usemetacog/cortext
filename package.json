@@ -20,7 +20,8 @@
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=node --target=node18 --banner:js='#!/usr/bin/env node' --outfile=dist/index.js && chmod +x dist/index.js",
     "dev": "tsx src/index.ts",
-    "prepublishOnly": "npm run build"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
@@ -30,7 +31,8 @@
     "@types/node": "^22.0.0",
     "esbuild": "^0.25.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.6"
   },
   "engines": {
     "node": ">=18"

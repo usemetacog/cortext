@@ -23,7 +23,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cacheRead: 
 
 const DEFAULT_PRICING = MODEL_PRICING['claude-sonnet-4-6'];
 
-function computeCost(model: string, usage: Usage): number {
+export function computeCost(model: string, usage: Usage): number {
   const p = MODEL_PRICING[model] ?? DEFAULT_PRICING;
   return (
     usage.input_tokens * p.input +
@@ -45,7 +45,7 @@ const CATEGORY_PATTERNS: Array<[PromptCategory, RegExp]> = [
   ['explain',   /\b(explain|how\s+does|what\s+is|what\s+does|describe|understand|why(?:\s+is|\s+does|\s+are)?|how\s+do|what\s+are|tell\s+me|walk\s+me)\b/i],
 ];
 
-function classifyPrompt(text: string): PromptCategory {
+export function classifyPrompt(text: string): PromptCategory {
   const wordCount = text.trim().split(/\s+/).length;
 
   // Long messages (pastes, detailed context) are never vague
@@ -70,7 +70,7 @@ function classifyPrompt(text: string): PromptCategory {
   return 'other';
 }
 
-function vagueScore(text: string): number {
+export function vagueScore(text: string): number {
   const words = text.trim().split(/\s+/).length;
   // Long messages or conversational replies are never flagged
   if (words > 200 || CONVERSATIONAL.test(text.trim())) return 0;
