@@ -1,0 +1,31 @@
+{
+  "name": "cortext",
+  "version": "0.1.0",
+  "description": "Metacognition for your Claude Code prompts",
+  "keywords": ["claude", "claude-code", "ai", "prompting", "analytics", "cli"],
+  "license": "MIT",
+  "bin": {
+    "cortext": "dist/index.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node18 --banner:js='#!/usr/bin/env node' --outfile=dist/index.js && chmod +x dist/index.js",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "chalk": "^4.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
