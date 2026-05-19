@@ -123,15 +123,30 @@ async function init() {
   // Worst prompt
   if (wpd) {
     document.getElementById('worst-card').style.display = '';
-    var promptText = wpd.prompt && wpd.prompt.text ? wpd.prompt.text : '';
+    var prompt = wpd.prompt || {};
+    var promptText = prompt.text || '';
     var heurText = wpd.heuristic || '';
     var rewriteText = wpd.rewrite && wpd.rewrite.rewrite ? wpd.rewrite.rewrite : '';
     var diagText = wpd.rewrite && wpd.rewrite.diagnosis ? wpd.rewrite.diagnosis : heurText;
-    var worstHtml =
-      '<div class="prompt-label">Original</div>' +
+    var ctxBefore = prompt.contextBefore || '';
+    var ctxAfter = prompt.contextAfter || '';
+    var afterLabel = prompt.followedByCorrection ? 'You (correction)' : 'Claude';
+    var worstHtml = '';
+    if (ctxBefore) {
+      worstHtml +=
+        '<div class="ctx-label">Claude</div>' +
+        '<div class="ctx-block">' + esc(ctxBefore) + '</div>';
+    }
+    worstHtml +=
+      '<div class="ctx-label you-label">You</div>' +
       '<div class="prompt-block">' + esc(promptText) + '</div>';
+    if (ctxAfter) {
+      worstHtml +=
+        '<div class="ctx-label">' + esc(afterLabel) + '</div>' +
+        '<div class="ctx-block">' + esc(ctxAfter) + '</div>';
+    }
     if (diagText) {
-      worstHtml += '<div class="diagnosis-text">&#x26A0; ' + esc(diagText) + '</div>';
+      worstHtml += '<div style="margin-top:16px" class="prompt-label">Why it failed</div><div class="diagnosis-text">&#x26A0; ' + esc(diagText) + '</div>';
     }
     if (rewriteText) {
       worstHtml += '<div class="prompt-label">Suggested rewrite</div><div class="rewrite-text">' + esc(rewriteText) + '</div>';
@@ -390,16 +405,39 @@ const HTML = `<!DOCTYPE html>
       letter-spacing: 0.6px;
       margin-bottom: 6px;
     }
-    .prompt-block {
+    .ctx-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 4px;
+      margin-top: 4px;
+    }
+    .ctx-label.you-label { color: var(--accent); }
+    .ctx-block {
       background: var(--bg);
       border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-bottom: 10px;
+      max-height: 120px;
+      overflow-y: auto;
+      line-height: 1.5;
+    }
+    .prompt-block {
+      background: rgba(88, 166, 255, 0.06);
+      border: 1px solid rgba(88, 166, 255, 0.25);
       border-radius: 6px;
       padding: 12px 16px;
       font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
       font-size: 12px;
+      color: var(--text);
       white-space: pre-wrap;
       word-break: break-word;
-      margin-bottom: 14px;
+      margin-bottom: 10px;
       max-height: 180px;
       overflow-y: auto;
     }

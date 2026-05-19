@@ -206,10 +206,28 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
     lines.push(line(chalk.dim(`${ts}  ·  ${prompt.projectName}`)));
     lines.push(blank());
 
-    for (const l of wrapText('"' + prompt.text + '"', INNER - 2)) {
-      lines.push(line(chalk.white(l)));
+    if (prompt.contextBefore) {
+      lines.push(line(chalk.dim('Claude:')));
+      for (const l of wrapText(prompt.contextBefore, INNER - 4)) {
+        lines.push(line('  ' + chalk.dim(l)));
+      }
+      lines.push(blank());
+    }
+
+    lines.push(line(chalk.dim('You:')));
+    for (const l of wrapText('"' + prompt.text + '"', INNER - 4)) {
+      lines.push(line('  ' + chalk.white(l)));
     }
     lines.push(blank());
+
+    if (prompt.contextAfter) {
+      const afterLabel = prompt.followedByCorrection ? 'You (correction):' : 'Claude:';
+      lines.push(line(chalk.dim(afterLabel)));
+      for (const l of wrapText(prompt.contextAfter, INNER - 4)) {
+        lines.push(line('  ' + chalk.dim(l)));
+      }
+      lines.push(blank());
+    }
 
     if (rewrite) {
       lines.push(line(chalk.dim('Why it failed:')));

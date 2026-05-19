@@ -45,6 +45,8 @@ export interface UserPrompt {
   category: PromptCategory;
   vagueScore: number;
   followedByCorrection: boolean;
+  contextBefore?: string; // truncated message immediately before this prompt
+  contextAfter?: string;  // truncated message immediately after this prompt
 }
 
 export interface SessionStats {

@@ -89,6 +89,29 @@ export function vagueScore(text: string): number {
 
 const SLASH_CMD = /^\/[a-zA-Z][a-zA-Z-]*/;
 
+function extractMessageText(role: 'user' | 'assistant', text: string, entry: RawEntry, maxLen = 160): string {
+  let raw: string;
+  if (role === 'user') {
+    raw = text;
+  } else {
+    const content = entry.message?.content;
+    if (!content) return '';
+    if (typeof content === 'string') {
+      raw = content;
+    } else {
+      raw = (content as Array<{ type: string; text?: string }>)
+        .filter(b => b.type === 'text')
+        .map(b => b.text ?? '')
+        .join('\n')
+        .trim();
+    }
+  }
+  if (!raw) return '';
+  // Collapse newlines/extra whitespace so the snippet reads as a single flow
+  raw = raw.replace(/\s+/g, ' ').trim();
+  return raw.length > maxLen ? raw.slice(0, maxLen).trimEnd() + '…' : raw;
+}
+
 function median(arr: number[]): number | null {
   if (arr.length < 2) return null;
   const s = [...arr].sort((a, b) => a - b);
@@ -218,6 +241,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
 
         const text = msg.text;
         const ts = msg.entry.timestamp ? new Date(msg.entry.timestamp) : new Date();
+        const prevMsg = messageSequence[i - 1];
         const nextMsg = messageSequence[i + 1];
         const followedByCorrection =
           nextMsg?.role === 'user' && CORRECTION_WORDS.test(nextMsg.text);
@@ -229,6 +253,13 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           afterAssistant?.role === 'user' &&
           CORRECTION_WORDS.test(afterAssistant.text);
 
+        const contextBefore = prevMsg
+          ? extractMessageText(prevMsg.role, prevMsg.text, prevMsg.entry)
+          : undefined;
+        const contextAfter = nextMsg
+          ? extractMessageText(nextMsg.role, nextMsg.text, nextMsg.entry)
+          : undefined;
+
         allPrompts.push({
           text,
           timestamp: ts,
@@ -238,6 +269,8 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           category: classifyPrompt(text),
           vagueScore: vagueScore(text),
           followedByCorrection: followedByCorrection || correctedAfterResponse,
+          contextBefore: contextBefore || undefined,
+          contextAfter: contextAfter || undefined,
         });
       }
 
