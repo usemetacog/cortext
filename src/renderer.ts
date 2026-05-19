@@ -80,7 +80,7 @@ const CATEGORY_ORDER: PromptCategory[] = [
   'fix', 'implement', 'explain', 'refactor', 'question', 'vague', 'other',
 ];
 
-export function render(result: AnalysisResult, worstPromptData?: WorstPromptData): void {
+export function render(result: AnalysisResult, worstPromptData?: WorstPromptData, evalInsight?: string | null): void {
   const lines: string[] = [];
 
   lines.push(top());
@@ -317,6 +317,10 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
   }
 
   lines.push(divider());
+  if (evalInsight) {
+    lines.push(line(chalk.dim(evalInsight)));
+    lines.push(blank());
+  }
   lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext --analyze') + chalk.dim('  for AI prompt improvement')));
   lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext goal') + chalk.dim('       to set a coaching goal')));
   lines.push(bottom());

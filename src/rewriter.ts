@@ -13,7 +13,7 @@ interface CacheEntry extends RewriteResult {
   cachedAt: string;
 }
 
-function hashPrompt(text: string): string {
+export function hashPrompt(text: string): string {
   return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
