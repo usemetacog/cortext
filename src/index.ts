@@ -11,6 +11,7 @@ import { ARCHETYPES, loadGoal, saveGoal } from './goals';
 import { runCoach } from './coach';
 import { saveReview, loadLatestReview, daysSinceLastReview, isInCooldown, COOLDOWN_DAYS } from './reviews';
 import { generateRewrite, heuristicDiagnosis } from './rewriter';
+import { startWebServer } from './server';
 import type { Goal, GoalRubric } from './types';
 
 const USAGE = `
@@ -23,6 +24,7 @@ Commands:
 Options:
   --days <n>        Analyze last n days (default: 30)
   --force           Regenerate review even if one was run in the last 7 days
+  --web             Open browser dashboard
   --analyze         AI-powered prompt improvement (needs ANTHROPIC_API_KEY)
   --interactive     Chat with Claude about your stats (needs ANTHROPIC_API_KEY)
   --help            Show this help
@@ -204,6 +206,7 @@ interface ParsedArgs {
   interactive: boolean;
   force: boolean;
   help: boolean;
+  web: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -214,6 +217,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let interactive = false;
   let force = false;
   let help = false;
+  let web = false;
 
   let i = 0;
 
@@ -237,16 +241,18 @@ function parseArgs(argv: string[]): ParsedArgs {
       interactive = true;
     } else if (args[i] === '--force') {
       force = true;
+    } else if (args[i] === '--web') {
+      web = true;
     } else if (args[i] === '--help' || args[i] === '-h') {
       help = true;
     }
   }
 
-  return { command, days, analyze, interactive, force, help };
+  return { command, days, analyze, interactive, force, help, web };
 }
 
 async function main(): Promise<void> {
-  const { command, days, analyze: shouldAnalyze, interactive: shouldInteract, force, help } = parseArgs(process.argv);
+  const { command, days, analyze: shouldAnalyze, interactive: shouldInteract, force, help, web: shouldWeb } = parseArgs(process.argv);
 
   if (help) {
     console.log(USAGE);
@@ -282,6 +288,11 @@ async function main(): Promise<void> {
     const heuristic = heuristicDiagnosis(worst);
     const rewrite = await generateRewrite(worst);
     worstPromptData = { prompt: worst, rewrite, heuristic };
+  }
+
+  if (shouldWeb) {
+    startWebServer(result, worstPromptData, days);
+    return;
   }
 
   render(result, worstPromptData);
