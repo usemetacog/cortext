@@ -14,6 +14,7 @@ import { generateRewrite, heuristicDiagnosis, hashPrompt } from './rewriter';
 import { logRewriteShown, checkAndLogOutcomes, loadOutcomeInsight } from './evallog';
 import { generateUnreadCallout } from './unread';
 import { startWebServer } from './server';
+import { runQuiz } from './quiz';
 import type { Goal, GoalRubric } from './types';
 
 const USAGE = `
@@ -22,10 +23,12 @@ Usage: npx cortext [command] [options]
 Commands:
   goal              Set a coaching goal (interactive wizard)
   review            Run a coaching critique against your active goal
+  quiz              Quiz yourself on your current git diff (needs ANTHROPIC_API_KEY)
 
 Options:
   --days <n>        Analyze last n days (default: 30)
   --force           Regenerate review even if one was run in the last 7 days
+  --staged          Quiz on staged changes only (default: all uncommitted changes)
   --web             Open browser dashboard
   --analyze         AI-powered prompt improvement (needs ANTHROPIC_API_KEY)
   --interactive     Chat with Claude about your stats (needs ANTHROPIC_API_KEY)
@@ -33,6 +36,8 @@ Options:
 
 Examples:
   npx cortext
+  npx cortext quiz
+  npx cortext quiz --staged
   npx cortext goal
   npx cortext review
   npx cortext review --days 7
@@ -202,13 +207,14 @@ async function runReview(days: number, force: boolean): Promise<void> {
 }
 
 interface ParsedArgs {
-  command: 'dashboard' | 'goal' | 'review';
+  command: 'dashboard' | 'goal' | 'review' | 'quiz';
   days: number;
   analyze: boolean;
   interactive: boolean;
   force: boolean;
   help: boolean;
   web: boolean;
+  staged: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -220,6 +226,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let force = false;
   let help = false;
   let web = false;
+  let staged = false;
 
   let i = 0;
 
@@ -229,6 +236,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     i = 1;
   } else if (args[0] === 'review') {
     command = 'review';
+    i = 1;
+  } else if (args[0] === 'quiz') {
+    command = 'quiz';
     i = 1;
   }
 
@@ -243,6 +253,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       interactive = true;
     } else if (args[i] === '--force') {
       force = true;
+    } else if (args[i] === '--staged') {
+      staged = true;
     } else if (args[i] === '--web') {
       web = true;
     } else if (args[i] === '--help' || args[i] === '-h') {
@@ -250,11 +262,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
 
-  return { command, days, analyze, interactive, force, help, web };
+  return { command, days, analyze, interactive, force, help, web, staged };
 }
 
 async function main(): Promise<void> {
-  const { command, days, analyze: shouldAnalyze, interactive: shouldInteract, force, help, web: shouldWeb } = parseArgs(process.argv);
+  const { command, days, analyze: shouldAnalyze, interactive: shouldInteract, force, help, web: shouldWeb, staged } = parseArgs(process.argv);
 
   if (help) {
     console.log(USAGE);
@@ -269,6 +281,11 @@ async function main(): Promise<void> {
   if (command === 'review') {
     await runReview(days, force);
     return;
+  }
+
+  if (command === 'quiz') {
+    const passed = await runQuiz(staged);
+    process.exit(passed ? 0 : 1);
   }
 
   // default: dashboard

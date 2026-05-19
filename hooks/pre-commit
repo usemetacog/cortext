@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# cortext diff quiz gate
+# Install: cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+QUIZ_LOG="$HOME/.cortext/quiz-log.jsonl"
+
+# Get staged diff; fall back to all uncommitted changes
+DIFF=$(git diff --cached 2>/dev/null)
+if [ -z "$DIFF" ]; then
+  DIFF=$(git diff HEAD 2>/dev/null)
+fi
+
+# Nothing to check if there are no changes
+if [ -z "$DIFF" ]; then
+  exit 0
+fi
+
+# Compute hash of the diff (16-char prefix of SHA-256)
+if command -v shasum &>/dev/null; then
+  HASH=$(echo "$DIFF" | shasum -a 256 | cut -c1-16)
+elif command -v sha256sum &>/dev/null; then
+  HASH=$(echo "$DIFF" | sha256sum | cut -c1-16)
+else
+  # Can't hash — skip the check silently
+  exit 0
+fi
+
+# Check for a passing quiz record for this diff
+if [ -f "$QUIZ_LOG" ]; then
+  if grep -q "\"diffHash\":\"$HASH\".*\"passed\":true" "$QUIZ_LOG" 2>/dev/null; then
+    exit 0
+  fi
+fi
+
+# No passing record found — warn but allow
+echo ""
+echo "  ⚠  cortext: no quiz record found for this diff."
+echo "     Run  npx cortext quiz --staged  or  /quiz-diff  in Claude Code"
+echo "     to verify you understand your changes before pushing."
+echo ""
+exit 0
