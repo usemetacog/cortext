@@ -53,6 +53,7 @@ Then type `/cortext` in any Claude Code conversation to get your usage report in
 ```bash
 npx cortext                   # last 30 days
 npx cortext --days 7          # last 7 days
+npx cortext --web             # open browser dashboard
 npx cortext --analyze         # + AI prompt improvement (needs ANTHROPIC_API_KEY)
 npx cortext review            # AI coaching report (needs ANTHROPIC_API_KEY + goal set)
 npx cortext review --force    # regenerate review, bypassing 7-day cooldown
@@ -75,6 +76,18 @@ npx cortext --help
 **Efficiency signals** — median prompt length, correction rate (sessions where you had to redirect Claude), and actionable flags
 
 **Top projects by spend** — where your tokens are going
+
+**Worst prompt** — the lowest-quality prompt from the period, with the message before and after it for context, plus an AI-generated rewrite
+
+**Did you read my response?** — moments where your follow-up question asked about something Claude's previous response already covered; add `ANTHROPIC_API_KEY` for a one-line callout on each catch
+
+## Browser dashboard
+
+```bash
+npx cortext --web
+```
+
+Starts a local HTTP server and opens a dark-theme dashboard in your browser with the same data as the TUI: spend, daily usage, prompt categories, top projects, efficiency signals, worst prompt rewrite, and the "did you read my response?" section. No new dependencies — served directly from the CLI.
 
 ## AI prompt improvement
 
