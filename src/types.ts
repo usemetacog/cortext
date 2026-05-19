@@ -60,6 +60,8 @@ export interface SessionStats {
   totalCacheCreationTokens: number;
   costUSD: number;
   model: string;
+  outputRatio: number | null; // write+edit share; null if < MIN_TOOL_CALLS
+  medianVagueScore: number | null;   // null when session has no user prompts
 }
 
 export interface DailyUsage {
@@ -100,6 +102,15 @@ export interface AnalysisResult {
   totalToolCalls: number;
   slashCommandCount: number;
   medianFirstMessageWords: number;
+  // output ratio metrics
+  outputRatioByBucket: {
+    specific: number | null; // median outputRatio where medianVagueScore < 3; null if N < 2
+    vague: number | null;    // median outputRatio where medianVagueScore >= 3; null if N < 2
+    nSpecific: number;
+    nVague: number;
+    nTotal: number;
+  };
+  medianOutputRatio: number | null; // overall median across all scored sessions
 }
 
 // ── Worst prompt rewrite ───────────────────────────────────────

@@ -231,6 +231,33 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
     }
   }
 
+  // Session metrics
+  if (result.medianOutputRatio !== null) {
+    lines.push(divider());
+    lines.push(sectionLabel('SESSION METRICS'));
+    lines.push(line(`Median output ratio: ${result.medianOutputRatio.toFixed(2)} (write+edit share)`));
+
+    const { specific, vague, nSpecific, nVague, nTotal } = result.outputRatioByBucket;
+
+    if (specific !== null && vague !== null) {
+      lines.push(blank());
+      const diff = specific - vague;
+      const diffStr = (diff >= 0 ? '+' : '') + diff.toFixed(2);
+      lines.push(line(`Prompt specificity vs output (diff: ${diffStr}):`));
+      const BAR_W = 12;
+      const maxVal = Math.max(specific, vague, 0.001);
+      lines.push(line(`  Specific (vague<3):  ${bar(specific / maxVal, BAR_W)} ${specific.toFixed(2)}`));
+      lines.push(line(`  Vague    (vague>=3): ${bar(vague / maxVal, BAR_W)} ${vague.toFixed(2)}`));
+    } else {
+      lines.push(blank());
+      lines.push(line(`  Specific (vague<3):  ${chalk.dim('—')}`));
+      lines.push(line(`  Vague    (vague>=3): ${chalk.dim('—')}`));
+    }
+
+    lines.push(blank());
+    lines.push(line(`N=${nTotal} sessions scored  (${nSpecific} specific / ${nVague} vague)`));
+  }
+
   lines.push(divider());
   lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext --analyze') + chalk.dim('  for AI prompt improvement')));
   lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext goal') + chalk.dim('       to set a coaching goal')));

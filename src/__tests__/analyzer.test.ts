@@ -161,6 +161,29 @@ function makeEntry(
   };
 }
 
+function makeAssistantWithTools(
+  sessionId: string,
+  toolNames: string[],
+  timestamp?: string,
+): ProjectData['entries'][number] {
+  const ts = timestamp ?? new Date().toISOString();
+  return {
+    type: 'assistant',
+    sessionId,
+    timestamp: ts,
+    message: {
+      model: 'claude-sonnet-4-6',
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
+      content: toolNames.map(name => ({ type: 'tool_use', name })),
+    },
+  };
+}
+
 describe('analyze', () => {
   it('returns zeroed result for empty projects', () => {
     const result = analyze([], 30);
@@ -246,5 +269,95 @@ describe('analyze', () => {
     expect(result.totalSessions).toBe(2);
     expect(result.totalPrompts).toBe(2);
     expect(result.totalInputTokens).toBe(800);
+  });
+});
+
+// ── output ratio metrics ─────────────────────────────────────────
+
+describe('output ratio metrics', () => {
+  it('medianOutputRatio is null when no session reaches MIN_TOOL_CALLS', () => {
+    const project: ProjectData = {
+      name: 'test',
+      entries: [
+        makeEntry('user', 's1', 'fix the auth bug in src/auth.ts'),
+        makeAssistantWithTools('s1', ['Read', 'Bash', 'Bash']), // 3 calls < 5
+      ],
+    };
+    const result = analyze([project], 30);
+    expect(result.medianOutputRatio).toBeNull();
+    expect(result.outputRatioByBucket.specific).toBeNull();
+    expect(result.outputRatioByBucket.vague).toBeNull();
+    expect(result.outputRatioByBucket.nTotal).toBe(0);
+  });
+
+  it('outputRatio reflects write+edit ratio when session has >= 5 tool calls', () => {
+    const t = (offset: number) => new Date(Date.now() + offset * 1000).toISOString();
+    const project: ProjectData = {
+      name: 'test',
+      entries: [
+        // Two sessions with 2/5 = 0.4 productive ratio each → overall median 0.4
+        makeEntry('user', 's1', 'add `getUserById` to src/users.ts — should return null instead of throwing', undefined, t(0)),
+        makeAssistantWithTools('s1', ['Read', 'Read', 'Read', 'Write', 'Write'], t(1)),
+        makeEntry('user', 's2', 'add `getUserById` to src/users.ts — should return null instead of throwing', undefined, t(2)),
+        makeAssistantWithTools('s2', ['Read', 'Read', 'Read', 'Write', 'Write'], t(3)),
+      ],
+    };
+    const result = analyze([project], 30);
+    expect(result.medianOutputRatio).toBeCloseTo(0.4);
+  });
+
+  it('outputRatioByBucket is null when a bucket has fewer than 2 sessions', () => {
+    const project: ProjectData = {
+      name: 'test',
+      entries: [
+        makeEntry('user', 's1', 'add `getUserById` to src/users.ts — should return null instead of throwing'),
+        makeAssistantWithTools('s1', ['Read', 'Read', 'Edit', 'Write', 'Bash']),
+      ],
+    };
+    const result = analyze([project], 30);
+    expect(result.outputRatioByBucket.specific).toBeNull();
+    expect(result.outputRatioByBucket.vague).toBeNull();
+  });
+
+  it('outputRatioByBucket has non-null medians with >= 2 sessions per bucket', () => {
+    const t = (offset: number) => new Date(Date.now() + offset * 1000).toISOString();
+    const project: ProjectData = {
+      name: 'test',
+      entries: [
+        // Specific session 1: detailed prompt (vagueScore < 3), productive tools
+        makeEntry('user', 's1', 'add `getUserById` to src/users.ts — should return null instead of throwing', undefined, t(0)),
+        makeAssistantWithTools('s1', ['Read', 'Edit', 'Write', 'Bash', 'Bash'], t(1)),
+        // Specific session 2: detailed prompt (vagueScore < 3), productive tools
+        makeEntry('user', 's2', 'fix the 401 error in src/auth.ts — should return 200 after valid login instead', undefined, t(2)),
+        makeAssistantWithTools('s2', ['Read', 'Write', 'Write', 'Bash', 'Read'], t(3)),
+        // Vague session 1: short prompt (vagueScore >= 3), no productive tools
+        makeEntry('user', 's3', 'fix it', undefined, t(4)),
+        makeAssistantWithTools('s3', ['Read', 'Read', 'Bash', 'Bash', 'Bash'], t(5)),
+        // Vague session 2: short prompt (vagueScore >= 3), no productive tools
+        makeEntry('user', 's4', 'update stuff', undefined, t(6)),
+        makeAssistantWithTools('s4', ['Bash', 'Bash', 'Bash', 'Bash', 'Read'], t(7)),
+      ],
+    };
+    const result = analyze([project], 30);
+    expect(result.outputRatioByBucket.specific).not.toBeNull();
+    expect(result.outputRatioByBucket.vague).not.toBeNull();
+    // Specific sessions have Edit/Write calls; vague sessions have only Bash/Read
+    expect(result.outputRatioByBucket.specific!).toBeGreaterThan(result.outputRatioByBucket.vague!);
+    expect(result.outputRatioByBucket.nSpecific).toBe(2);
+    expect(result.outputRatioByBucket.nVague).toBe(2);
+    expect(result.outputRatioByBucket.nTotal).toBe(4);
+  });
+
+  it('medianVagueScore excludes sessions with no user prompts from bucket aggregation', () => {
+    const project: ProjectData = {
+      name: 'test',
+      entries: [
+        // Session with no user message — should not appear in scoredSessions
+        makeAssistantWithTools('s1', ['Write', 'Write', 'Write', 'Write', 'Write']),
+      ],
+    };
+    const result = analyze([project], 30);
+    expect(result.medianOutputRatio).toBeNull();
+    expect(result.outputRatioByBucket.nTotal).toBe(0);
   });
 });
