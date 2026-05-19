@@ -23,6 +23,9 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cacheRead: 
 
 const DEFAULT_PRICING = MODEL_PRICING['claude-sonnet-4-6'];
 
+const PRODUCTIVE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const MIN_TOOL_CALLS = 5;
+
 export function computeCost(model: string, usage: Usage): number {
   const p = MODEL_PRICING[model] ?? DEFAULT_PRICING;
   return (
@@ -86,6 +89,12 @@ export function vagueScore(text: string): number {
 
 const SLASH_CMD = /^\/[a-zA-Z][a-zA-Z-]*/;
 
+function median(arr: number[]): number | null {
+  if (arr.length < 2) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+
 export function analyze(projects: ProjectData[], days: number): AnalysisResult {
   const dailyMap = new Map<string, DailyUsage>();
   const projectStatsMap = new Map<string, ProjectStats>();
@@ -125,12 +134,17 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
         totalCacheCreationTokens: 0,
         costUSD: 0,
         model: 'claude-sonnet-4-6',
+        effectivenessScore: null,
+        medianVagueScore: null,
       };
 
       // Build ordered message sequence for correction detection
       const messageSequence: Array<{ role: 'user' | 'assistant'; text: string; entry: RawEntry }> = [];
 
       let sessionFirstUserMessageWords: number | null = null;
+      let productiveToolCalls = 0;
+      let totalSessionToolCalls = 0;
+      const sessionPromptVagueScores: number[] = [];
 
       for (const entry of sorted) {
         if (entry.type === 'assistant' && entry.message?.usage) {
@@ -148,6 +162,10 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
             for (const block of entry.message.content as Array<{ type: string; name?: string }>) {
               if (block.type === 'tool_use' && block.name) {
                 allToolCalls.push(block.name);
+                if (!entry.isSidechain) {
+                  totalSessionToolCalls++;
+                  if (PRODUCTIVE_TOOLS.has(block.name)) productiveToolCalls++;
+                }
               }
             }
           }
@@ -179,6 +197,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
             if (SLASH_CMD.test(text.trim())) {
               slashCommandCount++;
             }
+            sessionPromptVagueScores.push(vagueScore(text));
           }
         }
       }
@@ -221,6 +240,17 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           followedByCorrection: followedByCorrection || correctedAfterResponse,
         });
       }
+
+      sessionStat.effectivenessScore =
+        totalSessionToolCalls >= MIN_TOOL_CALLS
+          ? productiveToolCalls / totalSessionToolCalls
+          : null;
+
+      const sortedVague = [...sessionPromptVagueScores].sort((a, b) => a - b);
+      sessionStat.medianVagueScore =
+        sortedVague.length > 0
+          ? sortedVague[Math.floor(sortedVague.length / 2)]
+          : null;
 
       if (sessionFirstUserMessageWords !== null) {
         firstMessageWordCounts.push(sessionFirstUserMessageWords);
@@ -330,6 +360,25 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
       ? sortedFirstMsgWords[Math.floor(sortedFirstMsgWords.length / 2)]
       : 0;
 
+  const scoredSessions = Array.from(sessions.values())
+    .filter(s => s.effectivenessScore !== null && s.medianVagueScore !== null);
+
+  const specificScores = scoredSessions
+    .filter(s => s.medianVagueScore! < 3)
+    .map(s => s.effectivenessScore!);
+  const vagueScores = scoredSessions
+    .filter(s => s.medianVagueScore! >= 3)
+    .map(s => s.effectivenessScore!);
+
+  const effectivenessByBucket = {
+    specific: median(specificScores),
+    vague: median(vagueScores),
+    nSpecific: specificScores.length,
+    nVague: vagueScores.length,
+    nTotal: scoredSessions.length,
+  };
+  const medianEffectivenessScore = median(scoredSessions.map(s => s.effectivenessScore!));
+
   return {
     totalSessions: sessions.size,
     totalPrompts: allPrompts.length,
@@ -351,5 +400,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     totalToolCalls,
     slashCommandCount,
     medianFirstMessageWords,
+    effectivenessByBucket,
+    medianEffectivenessScore,
   };
 }
