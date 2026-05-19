@@ -134,7 +134,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
         totalCacheCreationTokens: 0,
         costUSD: 0,
         model: 'claude-sonnet-4-6',
-        effectivenessScore: null,
+        outputRatio: null,
         medianVagueScore: null,
       };
 
@@ -241,7 +241,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
         });
       }
 
-      sessionStat.effectivenessScore =
+      sessionStat.outputRatio =
         totalSessionToolCalls >= MIN_TOOL_CALLS
           ? productiveToolCalls / totalSessionToolCalls
           : null;
@@ -361,23 +361,23 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
       : 0;
 
   const scoredSessions = Array.from(sessions.values())
-    .filter(s => s.effectivenessScore !== null && s.medianVagueScore !== null);
+    .filter(s => s.outputRatio !== null && s.medianVagueScore !== null);
 
   const specificScores = scoredSessions
     .filter(s => s.medianVagueScore! < 3)
-    .map(s => s.effectivenessScore!);
+    .map(s => s.outputRatio!);
   const vagueScores = scoredSessions
     .filter(s => s.medianVagueScore! >= 3)
-    .map(s => s.effectivenessScore!);
+    .map(s => s.outputRatio!);
 
-  const effectivenessByBucket = {
+  const outputRatioByBucket = {
     specific: median(specificScores),
     vague: median(vagueScores),
     nSpecific: specificScores.length,
     nVague: vagueScores.length,
     nTotal: scoredSessions.length,
   };
-  const medianEffectivenessScore = median(scoredSessions.map(s => s.effectivenessScore!));
+  const medianOutputRatio = median(scoredSessions.map(s => s.outputRatio!));
 
   return {
     totalSessions: sessions.size,
@@ -400,7 +400,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     totalToolCalls,
     slashCommandCount,
     medianFirstMessageWords,
-    effectivenessByBucket,
-    medianEffectivenessScore,
+    outputRatioByBucket,
+    medianOutputRatio,
   };
 }

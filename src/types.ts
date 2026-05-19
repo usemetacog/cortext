@@ -60,7 +60,7 @@ export interface SessionStats {
   totalCacheCreationTokens: number;
   costUSD: number;
   model: string;
-  effectivenessScore: number | null; // write+edit share; null if < MIN_TOOL_CALLS
+  outputRatio: number | null; // write+edit share; null if < MIN_TOOL_CALLS
   medianVagueScore: number | null;   // null when session has no user prompts
 }
 
@@ -102,15 +102,15 @@ export interface AnalysisResult {
   totalToolCalls: number;
   slashCommandCount: number;
   medianFirstMessageWords: number;
-  // effectiveness signals
-  effectivenessByBucket: {
-    specific: number | null; // median effectivenessScore where medianVagueScore < 3; null if N < 2
-    vague: number | null;    // median effectivenessScore where medianVagueScore >= 3; null if N < 2
+  // output ratio metrics
+  outputRatioByBucket: {
+    specific: number | null; // median outputRatio where medianVagueScore < 3; null if N < 2
+    vague: number | null;    // median outputRatio where medianVagueScore >= 3; null if N < 2
     nSpecific: number;
     nVague: number;
     nTotal: number;
   };
-  medianEffectivenessScore: number | null; // overall median across all scored sessions
+  medianOutputRatio: number | null; // overall median across all scored sessions
 }
 
 // ── Worst prompt rewrite ───────────────────────────────────────

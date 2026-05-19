@@ -272,10 +272,10 @@ describe('analyze', () => {
   });
 });
 
-// ── effectiveness scoring ─────────────────────────────────────────
+// ── output ratio metrics ─────────────────────────────────────────
 
-describe('effectiveness scoring', () => {
-  it('medianEffectivenessScore is null when no session reaches MIN_TOOL_CALLS', () => {
+describe('output ratio metrics', () => {
+  it('medianOutputRatio is null when no session reaches MIN_TOOL_CALLS', () => {
     const project: ProjectData = {
       name: 'test',
       entries: [
@@ -284,13 +284,13 @@ describe('effectiveness scoring', () => {
       ],
     };
     const result = analyze([project], 30);
-    expect(result.medianEffectivenessScore).toBeNull();
-    expect(result.effectivenessByBucket.specific).toBeNull();
-    expect(result.effectivenessByBucket.vague).toBeNull();
-    expect(result.effectivenessByBucket.nTotal).toBe(0);
+    expect(result.medianOutputRatio).toBeNull();
+    expect(result.outputRatioByBucket.specific).toBeNull();
+    expect(result.outputRatioByBucket.vague).toBeNull();
+    expect(result.outputRatioByBucket.nTotal).toBe(0);
   });
 
-  it('effectivenessScore reflects write+edit ratio when session has >= 5 tool calls', () => {
+  it('outputRatio reflects write+edit ratio when session has >= 5 tool calls', () => {
     const t = (offset: number) => new Date(Date.now() + offset * 1000).toISOString();
     const project: ProjectData = {
       name: 'test',
@@ -303,10 +303,10 @@ describe('effectiveness scoring', () => {
       ],
     };
     const result = analyze([project], 30);
-    expect(result.medianEffectivenessScore).toBeCloseTo(0.4);
+    expect(result.medianOutputRatio).toBeCloseTo(0.4);
   });
 
-  it('effectivenessByBucket is null when a bucket has fewer than 2 sessions', () => {
+  it('outputRatioByBucket is null when a bucket has fewer than 2 sessions', () => {
     const project: ProjectData = {
       name: 'test',
       entries: [
@@ -315,11 +315,11 @@ describe('effectiveness scoring', () => {
       ],
     };
     const result = analyze([project], 30);
-    expect(result.effectivenessByBucket.specific).toBeNull();
-    expect(result.effectivenessByBucket.vague).toBeNull();
+    expect(result.outputRatioByBucket.specific).toBeNull();
+    expect(result.outputRatioByBucket.vague).toBeNull();
   });
 
-  it('effectivenessByBucket has non-null medians with >= 2 sessions per bucket', () => {
+  it('outputRatioByBucket has non-null medians with >= 2 sessions per bucket', () => {
     const t = (offset: number) => new Date(Date.now() + offset * 1000).toISOString();
     const project: ProjectData = {
       name: 'test',
@@ -339,13 +339,13 @@ describe('effectiveness scoring', () => {
       ],
     };
     const result = analyze([project], 30);
-    expect(result.effectivenessByBucket.specific).not.toBeNull();
-    expect(result.effectivenessByBucket.vague).not.toBeNull();
+    expect(result.outputRatioByBucket.specific).not.toBeNull();
+    expect(result.outputRatioByBucket.vague).not.toBeNull();
     // Specific sessions have Edit/Write calls; vague sessions have only Bash/Read
-    expect(result.effectivenessByBucket.specific!).toBeGreaterThan(result.effectivenessByBucket.vague!);
-    expect(result.effectivenessByBucket.nSpecific).toBe(2);
-    expect(result.effectivenessByBucket.nVague).toBe(2);
-    expect(result.effectivenessByBucket.nTotal).toBe(4);
+    expect(result.outputRatioByBucket.specific!).toBeGreaterThan(result.outputRatioByBucket.vague!);
+    expect(result.outputRatioByBucket.nSpecific).toBe(2);
+    expect(result.outputRatioByBucket.nVague).toBe(2);
+    expect(result.outputRatioByBucket.nTotal).toBe(4);
   });
 
   it('medianVagueScore excludes sessions with no user prompts from bucket aggregation', () => {
@@ -357,7 +357,7 @@ describe('effectiveness scoring', () => {
       ],
     };
     const result = analyze([project], 30);
-    expect(result.medianEffectivenessScore).toBeNull();
-    expect(result.effectivenessByBucket.nTotal).toBe(0);
+    expect(result.medianOutputRatio).toBeNull();
+    expect(result.outputRatioByBucket.nTotal).toBe(0);
   });
 });

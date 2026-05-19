@@ -231,13 +231,13 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
     }
   }
 
-  // Effectiveness signals
-  if (result.medianEffectivenessScore !== null) {
+  // Session metrics
+  if (result.medianOutputRatio !== null) {
     lines.push(divider());
-    lines.push(sectionLabel('EFFECTIVENESS SIGNALS'));
-    lines.push(line(`Median effectiveness: ${result.medianEffectivenessScore.toFixed(2)} (write+edit share)`));
+    lines.push(sectionLabel('SESSION METRICS'));
+    lines.push(line(`Median output ratio: ${result.medianOutputRatio.toFixed(2)} (write+edit share)`));
 
-    const { specific, vague, nSpecific, nVague, nTotal } = result.effectivenessByBucket;
+    const { specific, vague, nSpecific, nVague, nTotal } = result.outputRatioByBucket;
 
     if (specific !== null && vague !== null) {
       lines.push(blank());
