@@ -249,6 +249,46 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
     }
   }
 
+  // "Did you read my response?" section
+  if (result.unreadMoments && result.unreadMoments.length > 0) {
+    lines.push(divider());
+    lines.push(sectionLabel('DID YOU READ MY RESPONSE?'));
+    lines.push(blank());
+
+    for (let i = 0; i < result.unreadMoments.length; i++) {
+      const moment = result.unreadMoments[i];
+      if (i > 0) {
+        lines.push(blank());
+        lines.push(line(chalk.dim('·'.repeat(INNER))));
+        lines.push(blank());
+      }
+
+      const ts = moment.timestamp.toLocaleString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit',
+      });
+      lines.push(line(chalk.dim(`${ts}  ·  ${moment.projectName}`)));
+      lines.push(blank());
+
+      lines.push(line(chalk.dim('Claude:')));
+      for (const l of wrapText(moment.claudeText, INNER - 4)) {
+        lines.push(line('  ' + chalk.dim(l)));
+      }
+      lines.push(blank());
+
+      lines.push(line(chalk.dim('You:')));
+      for (const l of wrapText('"' + moment.userFollowUp + '"', INNER - 4)) {
+        lines.push(line('  ' + chalk.white(l)));
+      }
+      lines.push(blank());
+
+      const callout = moment.aiCallout ?? 'This was already covered in my response above.';
+      for (const l of wrapText(callout, INNER - 4)) {
+        lines.push(line('  ' + chalk.red(l)));
+      }
+    }
+  }
+
   // Session metrics
   if (result.medianOutputRatio !== null) {
     lines.push(divider());

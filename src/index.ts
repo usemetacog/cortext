@@ -11,6 +11,7 @@ import { ARCHETYPES, loadGoal, saveGoal } from './goals';
 import { runCoach } from './coach';
 import { saveReview, loadLatestReview, daysSinceLastReview, isInCooldown, COOLDOWN_DAYS } from './reviews';
 import { generateRewrite, heuristicDiagnosis } from './rewriter';
+import { generateUnreadCallout } from './unread';
 import { startWebServer } from './server';
 import type { Goal, GoalRubric } from './types';
 
@@ -288,6 +289,12 @@ async function main(): Promise<void> {
     const heuristic = heuristicDiagnosis(worst);
     const rewrite = await generateRewrite(worst);
     worstPromptData = { prompt: worst, rewrite, heuristic };
+  }
+
+  if (result.unreadMoments.length > 0 && process.env.ANTHROPIC_API_KEY) {
+    for (const moment of result.unreadMoments) {
+      moment.aiCallout = await generateUnreadCallout(moment) ?? undefined;
+    }
   }
 
   if (shouldWeb) {

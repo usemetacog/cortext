@@ -120,6 +120,24 @@ async function init() {
     document.getElementById('output-ratio-content').innerHTML = orHtml;
   }
 
+  // "Did you read my response?" moments
+  var unreadMoments = result.unreadMoments || [];
+  if (unreadMoments.length > 0) {
+    document.getElementById('unread-card').style.display = '';
+    var unreadHtml = '';
+    for (var u = 0; u < unreadMoments.length; u++) {
+      var um = unreadMoments[u];
+      if (u > 0) unreadHtml += '<div class="unread-divider"></div>';
+      unreadHtml +=
+        '<div class="ctx-label">Claude</div>' +
+        '<div class="ctx-block">' + esc(um.claudeText) + '</div>' +
+        '<div class="ctx-label you-label">You (follow-up)</div>' +
+        '<div class="prompt-block">' + esc(um.userFollowUp) + '</div>' +
+        '<div class="callout-text">&#x1F440; ' + esc(um.aiCallout || 'This was already covered in my response above.') + '</div>';
+    }
+    document.getElementById('unread-content').innerHTML = unreadHtml;
+  }
+
   // Worst prompt
   if (wpd) {
     document.getElementById('worst-card').style.display = '';
@@ -458,6 +476,17 @@ const HTML = `<!DOCTYPE html>
       white-space: pre-wrap;
       word-break: break-word;
     }
+    .unread-divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 18px 0;
+    }
+    .callout-text {
+      font-size: 13px;
+      color: var(--red);
+      margin-top: 10px;
+      line-height: 1.5;
+    }
   </style>
 </head>
 <body>
@@ -490,6 +519,10 @@ const HTML = `<!DOCTYPE html>
         <div class="card-title">Session Output Ratio</div>
         <div id="output-ratio-content"></div>
       </div>
+    </div>
+    <div class="card" id="unread-card" style="display:none">
+      <div class="card-title">Did you read my response?</div>
+      <div id="unread-content"></div>
     </div>
     <div class="card" id="worst-card" style="display:none">
       <div class="card-title">Worst Prompt This Week</div>

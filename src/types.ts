@@ -97,6 +97,7 @@ export interface AnalysisResult {
   dailyUsage: DailyUsage[];
   projectStats: ProjectStats[];
   worstPrompts: UserPrompt[];
+  unreadMoments: UnreadMoment[];
   daysAnalyzed: number;
   // tool & skill signals
   toolsUsed: string[];
@@ -113,6 +114,17 @@ export interface AnalysisResult {
     nTotal: number;
   };
   medianOutputRatio: number | null; // overall median across all scored sessions
+}
+
+// ── Unread response moments ────────────────────────────────────
+
+export interface UnreadMoment {
+  claudeText: string;
+  userFollowUp: string;
+  aiCallout?: string;
+  timestamp: Date;
+  sessionId: string;
+  projectName: string;
 }
 
 // ── Worst prompt rewrite ───────────────────────────────────────

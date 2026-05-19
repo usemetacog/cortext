@@ -7,6 +7,7 @@ import type {
   PromptCategory,
   RawEntry,
   SessionStats,
+  UnreadMoment,
   Usage,
   UserPrompt,
 } from './types';
@@ -89,6 +90,32 @@ export function vagueScore(text: string): number {
 
 const SLASH_CMD = /^\/[a-zA-Z][a-zA-Z-]*/;
 
+// ── "Did you read my response?" detection ─────────────────────
+
+const STOP_WORDS_SET = new Set([
+  'the','a','an','is','are','was','were','it','in','on','at','to','for',
+  'of','and','or','but','with','this','that','you','i','my','your',
+  'how','why','when','where','can','do','did','does','have','has','had',
+  'be','been','will','would','should','could','make','use','run','get',
+  'set','need','want','also','just','like','from','they','their','which',
+  'into','more','some','than','then','these','those','there','here','not',
+]);
+
+function keyTerms(text: string): string[] {
+  return text.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 3 && !STOP_WORDS_SET.has(w));
+}
+
+function questionTermOverlap(terms: string[], responseText: string): number {
+  if (terms.length === 0) return 0;
+  const lower = responseText.toLowerCase();
+  return terms.filter(t => lower.includes(t)).length / terms.length;
+}
+
+const QUESTION_RE = /\?$|^(how|what|why|where|when|can|could|should|would|is|are|does|do|which)\b/i;
+
 function extractMessageText(role: 'user' | 'assistant', text: string, entry: RawEntry, maxLen = 160): string {
   let raw: string;
   if (role === 'user') {
@@ -122,6 +149,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
   const dailyMap = new Map<string, DailyUsage>();
   const projectStatsMap = new Map<string, ProjectStats>();
   const allPrompts: UserPrompt[] = [];
+  const allUnreadMoments: UnreadMoment[] = [];
   const sessions = new Map<string, SessionStats>();
   const allToolCalls: string[] = [];
   const firstMessageWordCounts: number[] = [];
@@ -231,6 +259,34 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
         const prev = messageSequence[i - 1];
         if (cur.role === 'user' && prev.role === 'assistant' && CORRECTION_WORDS.test(cur.text)) {
           sessionStat.correctionCount++;
+        }
+      }
+
+      // Detect "did you read my response?" moments
+      for (let i = 1; i < messageSequence.length; i++) {
+        const cur = messageSequence[i];
+        const prev = messageSequence[i - 1];
+        if (cur.role !== 'user' || prev.role !== 'assistant') continue;
+
+        const followUp = cur.text.trim();
+        const wc = followUp.split(/\s+/).length;
+        if (wc < 2 || wc > 15) continue;
+        if (!QUESTION_RE.test(followUp)) continue;
+
+        const claudeText = extractMessageText('assistant', '', prev.entry, 3000);
+        if (claudeText.length < 300) continue;
+
+        const terms = keyTerms(followUp);
+        if (terms.length < 2) continue;
+
+        if (questionTermOverlap(terms, claudeText) >= 0.5) {
+          allUnreadMoments.push({
+            claudeText: claudeText.slice(0, 350).trimEnd() + (claudeText.length > 350 ? '…' : ''),
+            userFollowUp: followUp,
+            timestamp: cur.entry.timestamp ? new Date(cur.entry.timestamp) : new Date(),
+            sessionId,
+            projectName: project.name,
+          });
         }
       }
 
@@ -375,6 +431,10 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     .sort((a, b) => (b.vagueScore + (b.followedByCorrection ? 2 : 0)) - (a.vagueScore + (a.followedByCorrection ? 2 : 0)))
     .slice(0, 5);
 
+  const unreadMoments = [...allUnreadMoments]
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    .slice(0, 5);
+
   const dailyUsage = Array.from(dailyMap.values())
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(-days);
@@ -427,6 +487,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     dailyUsage,
     projectStats,
     worstPrompts,
+    unreadMoments,
     daysAnalyzed: days,
     toolsUsed,
     toolDiversity,
