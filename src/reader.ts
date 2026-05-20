@@ -1,10 +1,11 @@
-import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
-import { join, basename } from 'path';
-import { homedir } from 'os';
-import type { RawEntry } from './types';
+import { readFileSync, readdirSync, existsSync, statSync } from "fs";
+import { join, basename } from "path";
+import { homedir } from "os";
+import type { RawEntry } from "./types";
 
-const CLAUDE_DIR = join(homedir(), '.claude');
-const PROJECTS_DIR = join(CLAUDE_DIR, 'projects');
+const CLAUDE_DIR = join(homedir(), ".claude");
+const PROJECTS_DIR =
+  process.env.CORTEXT_DATA_DIR ?? join(CLAUDE_DIR, "projects");
 
 export interface ProjectData {
   name: string;
@@ -12,7 +13,10 @@ export interface ProjectData {
 }
 
 export function readProjects(days: number): ProjectData[] {
-  if (!existsSync(PROJECTS_DIR)) return [];
+  if (!existsSync(PROJECTS_DIR)) {
+    console.error("empty dir");
+    return [];
+  }
 
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
@@ -22,7 +26,8 @@ export function readProjects(days: number): ProjectData[] {
 
   try {
     projectDirs = readdirSync(PROJECTS_DIR);
-  } catch {
+  } catch (err) {
+    console.error(err);
     return [];
   }
 
@@ -35,14 +40,14 @@ export function readProjects(days: number): ProjectData[] {
     }
 
     const entries: RawEntry[] = [];
-    let projectName = '';
+    let projectName = "";
 
     try {
-      const files = readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
+      const files = readdirSync(projectDir).filter((f) => f.endsWith(".jsonl"));
 
       for (const file of files) {
-        const content = readFileSync(join(projectDir, file), 'utf-8');
-        for (const line of content.split('\n')) {
+        const content = readFileSync(join(projectDir, file), "utf-8");
+        for (const line of content.split("\n")) {
           if (!line.trim()) continue;
           try {
             const entry = JSON.parse(line) as RawEntry;
@@ -67,7 +72,7 @@ export function readProjects(days: number): ProjectData[] {
 
     // Fall back to decoding dir name if no cwd found
     if (!projectName) {
-      projectName = dirName.split('-').pop() ?? dirName;
+      projectName = dirName.split("-").pop() ?? dirName;
     }
 
     results.push({ name: projectName, entries });
@@ -76,20 +81,22 @@ export function readProjects(days: number): ProjectData[] {
   return results;
 }
 
-export function extractUserText(content: string | Array<{ type: string; text?: string }>): string | null {
-  if (typeof content === 'string') {
+export function extractUserText(
+  content: string | Array<{ type: string; text?: string }>,
+): string | null {
+  if (typeof content === "string") {
     const t = content.trim();
     // Skip slash-command XML wrappers and empty strings
-    if (!t || t.startsWith('<')) return null;
+    if (!t || t.startsWith("<")) return null;
     return t;
   }
 
   if (Array.isArray(content)) {
     const parts = content
-      .filter(b => b.type === 'text' && b.text)
-      .map(b => (b.text ?? '').trim())
-      .filter(t => t && !t.startsWith('<'));
-    return parts.length > 0 ? parts.join(' ') : null;
+      .filter((b) => b.type === "text" && b.text)
+      .map((b) => (b.text ?? "").trim())
+      .filter((t) => t && !t.startsWith("<"));
+    return parts.length > 0 ? parts.join(" ") : null;
   }
 
   return null;

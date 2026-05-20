@@ -10,13 +10,20 @@ export interface WorstPromptData {
 const WIDTH = 62;
 const INNER = WIDTH - 4; // inside the box borders + 2 spaces padding
 
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1B\[[0-9;]*m/g;
+
+function visibleLen(s: string): number {
+  return s.replace(ANSI_RE, '').length;
+}
+
 function pad(s: string, n: number): string {
-  return s.padEnd(n);
+  const spaces = Math.max(0, n - visibleLen(s));
+  return s + ' '.repeat(spaces);
 }
 
 function line(content: string): string {
-  const truncated = content.slice(0, INNER);
-  return `${chalk.dim('║')} ${pad(truncated, INNER)} ${chalk.dim('║')}`;
+  return `${chalk.dim('║')} ${pad(content, INNER)} ${chalk.dim('║')}`;
 }
 
 function divider(): string {
