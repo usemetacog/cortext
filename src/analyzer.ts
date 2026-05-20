@@ -74,7 +74,10 @@ export function classifyPrompt(text: string): PromptCategory {
   return 'other';
 }
 
-export function vagueScore(text: string): number {
+export function vagueScore(
+  text: string,
+  ctx?: { turnIndex: number; priorUserWords: number },
+): number {
   const words = text.trim().split(/\s+/).length;
   // Long messages or conversational replies are never flagged
   if (words > 200 || CONVERSATIONAL.test(text.trim())) return 0;
@@ -85,7 +88,12 @@ export function vagueScore(text: string): number {
   if (!/[\/\.][a-z]/i.test(text)) score += 1;            // no file path
   if (!/`[^`]+`/.test(text)) score += 1;                 // no inline code
   if (!/should|expected|want|need|instead/.test(text)) score += 1; // no expected outcome
-  return score;
+  // Context discounts: short follow-ups in an established conversation are intentional
+  if (ctx) {
+    if (ctx.turnIndex > 0) score -= 1;        // not the session opener
+    if (ctx.priorUserWords > 30) score -= 2;  // prior message established substantial context
+  }
+  return Math.max(0, score);
 }
 
 const SLASH_CMD = /^\/[a-zA-Z][a-zA-Z-]*/;
@@ -248,7 +256,6 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
             if (SLASH_CMD.test(text.trim())) {
               slashCommandCount++;
             }
-            sessionPromptVagueScores.push(vagueScore(text));
           }
         }
       }
@@ -290,7 +297,8 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
         }
       }
 
-      // Record user prompts
+      // Record user prompts (also collects context-aware vague scores)
+      let userTurnIndex = 0;
       for (let i = 0; i < messageSequence.length; i++) {
         const msg = messageSequence[i];
         if (msg.role !== 'user') continue;
@@ -316,6 +324,20 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           ? extractMessageText(nextMsg.role, nextMsg.text, nextMsg.entry)
           : undefined;
 
+        // Find the most recent prior user message word count for context discount
+        let priorUserWords = 0;
+        for (let j = i - 1; j >= 0; j--) {
+          if (messageSequence[j].role === 'user') {
+            priorUserWords = messageSequence[j].text.split(/\s+/).length;
+            break;
+          }
+        }
+
+        const ctx = { turnIndex: userTurnIndex, priorUserWords };
+        const score = vagueScore(text, ctx);
+        sessionPromptVagueScores.push(score);
+        userTurnIndex++;
+
         allPrompts.push({
           text,
           timestamp: ts,
@@ -323,7 +345,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           projectName: project.name,
           wordCount: text.split(/\s+/).length,
           category: classifyPrompt(text),
-          vagueScore: vagueScore(text),
+          vagueScore: score,
           followedByCorrection: followedByCorrection || correctedAfterResponse,
           contextBefore: contextBefore || undefined,
           contextAfter: contextAfter || undefined,
