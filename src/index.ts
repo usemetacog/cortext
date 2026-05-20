@@ -15,7 +15,7 @@ import { logRewriteShown, checkAndLogOutcomes, loadOutcomeInsight } from './eval
 import { generateUnreadCallout } from './unread';
 import { startWebServer } from './server';
 import { runQuiz } from './quiz';
-import type { Goal, GoalRubric } from './types';
+import type { Goal, GoalRubric, PeriodDelta } from './types';
 
 const USAGE = `
 Usage: npx cortext [command] [options]
@@ -301,6 +301,30 @@ async function main(): Promise<void> {
 
   const result = analyze(projects, days);
 
+  // Compute prior period for period-over-period deltas
+  const priorProjects = readProjects(days, days);
+  const priorResult = priorProjects.length > 0 ? analyze(priorProjects, days) : null;
+
+  const MIN_PRIOR_SESSIONS = 10;
+  let delta: PeriodDelta | undefined;
+  if (priorResult && priorResult.totalSessions >= MIN_PRIOR_SESSIONS) {
+    delta = {
+      costPct: priorResult.totalCost > 0
+        ? (result.totalCost - priorResult.totalCost) / priorResult.totalCost
+        : null,
+      cacheHitRatePp: (result.cacheHitRate - priorResult.cacheHitRate) * 100,
+      medianWordsDelta: result.avgPromptWords - priorResult.avgPromptWords,
+      priorSessions: priorResult.totalSessions,
+    };
+  } else {
+    delta = {
+      costPct: null,
+      cacheHitRatePp: null,
+      medianWordsDelta: null,
+      priorSessions: priorResult?.totalSessions ?? 0,
+    };
+  }
+
   const vagueRate = result.promptCategories.vague / (result.totalPrompts || 1);
   checkAndLogOutcomes(result.correctionRate, vagueRate);
 
@@ -330,7 +354,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  render(result, worstPromptData, loadOutcomeInsight());
+  render(result, worstPromptData, loadOutcomeInsight(), delta);
 
   // show active goal hint if set
   const goal = loadGoal();

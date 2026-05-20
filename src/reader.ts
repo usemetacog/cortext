@@ -12,14 +12,21 @@ export interface ProjectData {
   entries: RawEntry[];
 }
 
-export function readProjects(days: number): ProjectData[] {
+export function readProjects(days: number, offsetDays = 0): ProjectData[] {
   if (!existsSync(PROJECTS_DIR)) {
     console.error("empty dir");
     return [];
   }
 
   const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
+  cutoff.setDate(cutoff.getDate() - days - offsetDays);
+
+  // When reading a prior period, we also need an upper bound
+  const upperBound: Date | null = offsetDays > 0 ? (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - offsetDays);
+    return d;
+  })() : null;
 
   const results: ProjectData[] = [];
   let projectDirs: string[];
@@ -56,7 +63,11 @@ export function readProjects(days: number): ProjectData[] {
               projectName = basename(entry.cwd);
             }
             // Filter to date range (entries without timestamps are included)
-            if (!entry.timestamp || new Date(entry.timestamp) >= cutoff) {
+            const ts = entry.timestamp ? new Date(entry.timestamp) : null;
+            const inWindow =
+              !ts ||
+              (ts >= cutoff && (upperBound === null || ts < upperBound));
+            if (inWindow) {
               entries.push(entry);
             }
           } catch {

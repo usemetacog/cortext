@@ -37,7 +37,7 @@ async function init() {
   // Stat cards
   const cacheColor = result.cacheHitRate > 0.5 ? 'green' : '';
   document.getElementById('stat-cards').innerHTML =
-    '<div class="stat-card"><div class="stat-label">Total Spend</div><div class="stat-value accent">$' + result.totalCost.toFixed(2) + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">API Equiv. Cost</div><div class="stat-value accent">$' + result.totalCost.toFixed(2) + '</div></div>' +
     '<div class="stat-card"><div class="stat-label">Sessions</div><div class="stat-value">' + result.totalSessions.toLocaleString() + '</div></div>' +
     '<div class="stat-card"><div class="stat-label">Prompts</div><div class="stat-value">' + result.totalPrompts.toLocaleString() + '</div></div>' +
     '<div class="stat-card"><div class="stat-label">Cache Hit Rate</div><div class="stat-value ' + cacheColor + '">' + (result.cacheHitRate * 100).toFixed(0) + '%</div></div>';
@@ -53,7 +53,7 @@ async function init() {
       var label = d.date.slice(5);
       chartHtml += '<div class="day-col">' +
         '<div class="day-bar-wrap" style="height:' + pct.toFixed(1) + '%">' +
-        '<div class="day-tooltip">' + esc(d.date) + '<br>$' + d.cost.toFixed(3) + '<br>' + d.sessions + ' session' + (d.sessions !== 1 ? 's' : '') + '</div>' +
+        '<div class="day-tooltip">' + esc(d.date) + '<br>~$' + d.cost.toFixed(3) + ' API equiv.<br>' + d.sessions + ' session' + (d.sessions !== 1 ? 's' : '') + '</div>' +
         '</div>' +
         '<div class="day-label">' + esc(label) + '</div>' +
         '</div>';
@@ -82,7 +82,7 @@ async function init() {
   for (var p = 0; p < projects.length; p++) {
     var proj = projects[p];
     var projPct = (proj.cost / maxProj) * 100;
-    projHtml += barRow(proj.name, projPct, '$' + proj.cost.toFixed(2), '');
+    projHtml += barRow(proj.name, projPct, '~$' + proj.cost.toFixed(2), '');
   }
   document.getElementById('projects-chart').innerHTML = projHtml || '<div style="color:var(--muted)">No data</div>';
 
@@ -497,7 +497,7 @@ const HTML = `<!DOCTYPE html>
   <div id="app">
     <div class="stat-cards" id="stat-cards"></div>
     <div class="card">
-      <div class="card-title">Daily Spend</div>
+      <div class="card-title">Daily API Cost</div>
       <div class="daily-outer" id="daily-chart"></div>
     </div>
     <div class="two-col">
@@ -506,7 +506,7 @@ const HTML = `<!DOCTYPE html>
         <div id="categories-chart"></div>
       </div>
       <div class="card">
-        <div class="card-title">Top Projects by Spend</div>
+        <div class="card-title">Top Projects by API Cost</div>
         <div id="projects-chart"></div>
       </div>
     </div>

@@ -116,6 +116,15 @@ export interface AnalysisResult {
   medianOutputRatio: number | null; // overall median across all scored sessions
 }
 
+// ── Period-over-period delta ───────────────────────────────────
+
+export interface PeriodDelta {
+  costPct: number | null;          // % change in totalCost (positive = more expensive)
+  cacheHitRatePp: number | null;   // pp change in cache hit rate
+  medianWordsDelta: number | null; // change in median prompt word count
+  priorSessions: number;           // number of sessions in the prior period
+}
+
 // ── Unread response moments ────────────────────────────────────
 
 export interface UnreadMoment {
