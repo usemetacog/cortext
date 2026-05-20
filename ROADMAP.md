@@ -12,12 +12,13 @@ The tool gives a snapshot, not a trajectory. There's no comparison to a prior pe
 ### 4. API key gate blocks the most useful features
 `--analyze` and `review` require `ANTHROPIC_API_KEY`. Subscription users don't have one readily available — they'd need to set up a separate API billing account. This locks out the features that differentiate cortext from a plain stats dashboard.
 
-### 5. First-run experience has a hidden prerequisite
-`npx cortext review` silently requires `npx cortext goal` to have been run first. New users hit an error with no helpful guidance. The onboarding flow is not self-directing.
 
 ---
 
 ## Done
+
+### 5. First-run experience has a hidden prerequisite
+`runGoalWizard` now returns `Goal | null`. `runReview` calls it inline when no goal is found, then continues straight into the review on success — no second command needed. The "run npx cortext review" hint is preserved when the wizard is invoked directly via `npx cortext goal`.
 
 ### 3. Vague classifier misfires on expert users
 Added context parameters to `vagueScore`: `-1` if the prompt is not the session opener, `-2` if the prior user message was >30 words. Moved vague score computation from the context-blind first pass into the `messageSequence` loop where turn index and prior message word count are available. Short follow-ups in established conversations no longer get flagged.
