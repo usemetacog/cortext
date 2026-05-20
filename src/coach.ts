@@ -90,7 +90,12 @@ function buildUserMessage(result: AnalysisResult): string {
 export async function runCoach(result: AnalysisResult, goal: Goal): Promise<CoachReport | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.error('\nANTHROPIC_API_KEY not set. Export it to use cortext review.\n');
+    console.error('\nThis feature calls the Anthropic API — separate from your Claude Code subscription.');
+    console.error('\nGet a free key at: https://console.anthropic.com  (free tier covers review usage)');
+    console.error('\nThen run:');
+    console.error('  export ANTHROPIC_API_KEY=sk-ant-...');
+    console.error('  npx cortext review');
+    console.error('\nTo make it permanent: add the export line to your ~/.zshrc or ~/.bashrc\n');
     process.exit(1);
   }
 

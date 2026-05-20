@@ -19,7 +19,8 @@ interface PromptAnalysis {
 export async function analyzePrompts(prompts: UserPrompt[]): Promise<void> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.error('\nANTHROPIC_API_KEY not set. Export it to use --analyze.\n');
+    console.error('\nThis feature calls the Anthropic API — separate from your Claude Code subscription.');
+    console.error('Get a free key at: https://console.anthropic.com  then: export ANTHROPIC_API_KEY=sk-ant-...\n');
     process.exit(1);
   }
 

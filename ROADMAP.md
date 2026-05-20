@@ -9,13 +9,14 @@ Gaps identified before the tool is genuinely useful to heavy Claude Code users.
 ### 2. No trend data — can't see improvement over time
 The tool gives a snapshot, not a trajectory. There's no comparison to a prior period (e.g. "vague prompt rate: 28% → 19%"). The coaching review has a 7-day cooldown but no diff against the previous report. Behavior change requires visible movement.
 
-### 4. API key gate blocks the most useful features
-`--analyze` and `review` require `ANTHROPIC_API_KEY`. Subscription users don't have one readily available — they'd need to set up a separate API billing account. This locks out the features that differentiate cortext from a plain stats dashboard.
 
 
 ---
 
 ## Done
+
+### 4. API key gate blocks the most useful features
+Replaced terse `ANTHROPIC_API_KEY not set` errors in `coach.ts` and `suggester.ts` with contextual messages explaining the API/subscription distinction, linking to `console.anthropic.com`, and giving the exact export command and shell rc tip. Upgraded `heuristicDiagnosis` in `rewriter.ts` from passive "Missing: no file path" to prescriptive actionable fixes, so the no-key worst-prompt experience is genuinely useful.
 
 ### 5. First-run experience has a hidden prerequisite
 `runGoalWizard` now returns `Goal | null`. `runReview` calls it inline when no goal is found, then continues straight into the review on success — no second command needed. The "run npx cortext review" hint is preserved when the wizard is invoked directly via `npx cortext goal`.
