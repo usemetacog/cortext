@@ -207,6 +207,24 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
   const avgWords = Math.round(result.avgPromptWords);
   lines.push(line(`Median prompt length:  ${chalk.white(avgWords + ' words')}`));
   lines.push(line(`Correction rate:    ${chalk.white(pct(result.correctionRate) + ' of sessions')}`));
+
+  const slashTotal = Object.values(result.slashCommands).reduce((a, b) => a + b, 0);
+  if (slashTotal > 0) {
+    const KEY_CMDS = ['/clear', '/plan', '/compact', '/rewind'];
+    const keyCounts = KEY_CMDS
+      .map(cmd => ({ cmd, n: result.slashCommands[cmd] ?? 0 }))
+      .filter(x => x.n > 0)
+      .map(x => `${x.cmd} ×${x.n}`)
+      .join('  ');
+    const breakdown = keyCounts ? chalk.dim(`  (${keyCounts})`) : '';
+    lines.push(line(`Slash commands:     ${chalk.white(String(slashTotal))}${breakdown}`));
+  }
+
+  const actionableTotal = (result.promptCategories.implement ?? 0) + (result.promptCategories.fix ?? 0);
+  if (actionableTotal > 0) {
+    const verifiedCount = Math.round(result.verificationRate * actionableTotal);
+    lines.push(line(`Verification rate:  ${chalk.white(pct(result.verificationRate))} of implement/fix prompts  ${chalk.dim(`(${verifiedCount}/${actionableTotal})`)}`));
+  }
   lines.push(blank());
 
   const vagueCount = result.promptCategories.vague;
@@ -217,6 +235,18 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
   }
   if (correctedSessions > 0) {
     lines.push(line(chalk.yellow(`[!] ${correctedSessions} session${correctedSessions !== 1 ? 's' : ''} had correction turns`)));
+  }
+  if (actionableTotal >= 5 && result.verificationRate < 0.2) {
+    lines.push(line(chalk.yellow(`[!] Only ${pct(result.verificationRate)} of implement/fix prompts include verification`)));
+  } else if (actionableTotal >= 5 && result.verificationRate >= 0.5) {
+    lines.push(line(chalk.green(`[✓] Verification criteria in ${pct(result.verificationRate)} of implement/fix prompts`)));
+  }
+  const clearCount = result.slashCommands['/clear'] ?? 0;
+  if (clearCount > 0 && result.totalSessions > 0) {
+    const clearPerSession = clearCount / result.totalSessions;
+    if (clearPerSession >= 0.3) {
+      lines.push(line(chalk.green(`[✓] Using /clear regularly (${clearCount}× across ${result.totalSessions} sessions)`)));
+    }
   }
   if (result.cacheHitRate >= 0.8) {
     lines.push(line(chalk.green(`[✓] Excellent cache hit rate (${pct(result.cacheHitRate)})`)));
@@ -489,6 +519,8 @@ export function renderCoachReport(report: CoachReport, goal: Goal, days: number)
     ['Tool diversity', 'toolDiversity'],
     ['Front-loading', 'frontloading'],
     ['Efficiency   ', 'efficiency'],
+    ['Ctx mgmt     ', 'contextManagement'],
+    ['Verification ', 'verificationHabit'],
   ];
 
   for (const [label, key] of signals) {

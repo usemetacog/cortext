@@ -98,6 +98,13 @@ export function vagueScore(
 
 const SLASH_CMD = /^\/[a-zA-Z][a-zA-Z-]*/;
 
+// Strict verification signal: only explicit test/check/verify language, not outcome words like "should"
+const VERIFICATION_RE = /\b(run (the |all )?tests?|verify|check (that|it|the)\b|screenshot|expected output|failing test|make sure (it|the|that))\b/i;
+
+export function hasVerificationCriteria(text: string): boolean {
+  return VERIFICATION_RE.test(text);
+}
+
 // ── "Did you read my response?" detection ─────────────────────
 
 const STOP_WORDS_SET = new Set([
@@ -161,7 +168,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
   const sessions = new Map<string, SessionStats>();
   const allToolCalls: string[] = [];
   const firstMessageWordCounts: number[] = [];
-  let slashCommandCount = 0;
+  const slashCommandMap = new Map<string, number>();
 
   for (const project of projects) {
     const sessionEntries = new Map<string, RawEntry[]>();
@@ -253,8 +260,10 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
             if (sessionFirstUserMessageWords === null) {
               sessionFirstUserMessageWords = text.split(/\s+/).length;
             }
-            if (SLASH_CMD.test(text.trim())) {
-              slashCommandCount++;
+            const slashMatch = text.trim().match(SLASH_CMD);
+            if (slashMatch) {
+              const cmd = slashMatch[0].toLowerCase();
+              slashCommandMap.set(cmd, (slashCommandMap.get(cmd) ?? 0) + 1);
             }
           }
         }
@@ -338,15 +347,17 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
         sessionPromptVagueScores.push(score);
         userTurnIndex++;
 
+        const category = classifyPrompt(text);
         allPrompts.push({
           text,
           timestamp: ts,
           sessionId,
           projectName: project.name,
           wordCount: text.split(/\s+/).length,
-          category: classifyPrompt(text),
+          category,
           vagueScore: score,
           followedByCorrection: followedByCorrection || correctedAfterResponse,
+          hasVerification: (category === 'implement' || category === 'fix') && hasVerificationCriteria(text),
           contextBefore: contextBefore || undefined,
           contextAfter: contextAfter || undefined,
         });
@@ -494,6 +505,11 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
   };
   const medianOutputRatio = median(scoredSessions.map(s => s.outputRatio!));
 
+  const actionablePrompts = allPrompts.filter(p => p.category === 'implement' || p.category === 'fix');
+  const verificationRate = actionablePrompts.length > 0
+    ? actionablePrompts.filter(p => p.hasVerification).length / actionablePrompts.length
+    : 0;
+
   return {
     totalSessions: sessions.size,
     totalPrompts: allPrompts.length,
@@ -514,8 +530,9 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     toolsUsed,
     toolDiversity,
     totalToolCalls,
-    slashCommandCount,
+    slashCommands: Object.fromEntries(slashCommandMap),
     medianFirstMessageWords,
+    verificationRate,
     outputRatioByBucket,
     medianOutputRatio,
   };

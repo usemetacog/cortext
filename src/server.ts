@@ -94,8 +94,21 @@ async function init() {
     '<div class="signal-row"><span class="signal-name">Median prompt length</span><span class="signal-val ' + wordCls + '">' + result.avgPromptWords + ' words</span></div>' +
     '<div class="signal-row"><span class="signal-name">Correction rate</span><span class="signal-val ' + corrCls + '">' + corrPct + '%</span></div>' +
     '<div class="signal-row"><span class="signal-name">Tool diversity</span><span class="signal-val">' + (result.toolsUsed ? result.toolsUsed.length : 0) + ' tools</span></div>' +
-    '<div class="signal-row"><span class="signal-name">Slash commands</span><span class="signal-val">' + result.slashCommandCount + '</span></div>' +
-    '<div class="signal-row"><span class="signal-name">Median first-msg words</span><span class="signal-val">' + result.medianFirstMessageWords + '</span></div>';
+    '<div class="signal-row"><span class="signal-name">Slash commands</span><span class="signal-val">' + Object.values(result.slashCommands ?? {}).reduce(function(a, b) { return a + b; }, 0) + '</span></div>' +
+    (function() {
+      var KEY_CMDS = ['/clear', '/plan', '/compact', '/rewind'];
+      var cmds = result.slashCommands ?? {};
+      var parts = KEY_CMDS.filter(function(c) { return cmds[c] > 0; }).map(function(c) { return c + ' \xd7' + cmds[c]; });
+      return parts.length > 0 ? '<div class="signal-row"><span class="signal-name" style="font-size:0.85em;opacity:0.7">  breakdown</span><span class="signal-val" style="font-size:0.85em;opacity:0.7">' + parts.join('  ') + '</span></div>' : '';
+    })() +
+    '<div class="signal-row"><span class="signal-name">Median first-msg words</span><span class="signal-val">' + result.medianFirstMessageWords + '</span></div>' +
+    (function() {
+      var actionable = (result.promptCategories.implement || 0) + (result.promptCategories.fix || 0);
+      if (actionable === 0) return '';
+      var verPct = Math.round((result.verificationRate || 0) * 100);
+      var verCls = verPct >= 50 ? 'good' : verPct < 20 ? 'bad' : 'warn';
+      return '<div class="signal-row"><span class="signal-name">Verification rate</span><span class="signal-val ' + verCls + '">' + verPct + '%</span></div>';
+    })();
 
   // Output ratio panel
   if (result.medianOutputRatio !== null && result.medianOutputRatio !== undefined) {

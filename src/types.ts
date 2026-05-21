@@ -45,6 +45,7 @@ export interface UserPrompt {
   category: PromptCategory;
   vagueScore: number;
   followedByCorrection: boolean;
+  hasVerification: boolean;
   contextBefore?: string; // truncated message immediately before this prompt
   contextAfter?: string;  // truncated message immediately after this prompt
 }
@@ -103,8 +104,9 @@ export interface AnalysisResult {
   toolsUsed: string[];
   toolDiversity: number;
   totalToolCalls: number;
-  slashCommandCount: number;
+  slashCommands: Record<string, number>;
   medianFirstMessageWords: number;
+  verificationRate: number; // fraction of implement+fix prompts that include explicit verification criteria
   // output ratio metrics
   outputRatioByBucket: {
     specific: number | null; // median outputRatio where medianVagueScore < 3; null if N < 2
@@ -184,6 +186,8 @@ export interface CoachReport {
     toolDiversity: SignalScore;
     frontloading: SignalScore;
     efficiency: SignalScore;
+    contextManagement: SignalScore;
+    verificationHabit: SignalScore;
   };
   worstMoments: Array<{
     original: string;

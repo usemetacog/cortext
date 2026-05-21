@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyPrompt, vagueScore, computeCost, analyze } from '../analyzer';
+import { classifyPrompt, vagueScore, computeCost, analyze, hasVerificationCriteria } from '../analyzer';
 import type { ProjectData } from '../reader';
 
 // ── classifyPrompt ────────────────────────────────────────────────
@@ -88,6 +88,35 @@ describe('vagueScore', () => {
 
   it('returns 0 for long messages', () => {
     expect(vagueScore('word '.repeat(201))).toBe(0);
+  });
+});
+
+// ── hasVerificationCriteria ───────────────────────────────────────
+
+describe('hasVerificationCriteria', () => {
+  it('detects "run tests"', () => {
+    expect(hasVerificationCriteria('add OAuth to src/auth.ts and run tests')).toBe(true);
+    expect(hasVerificationCriteria('add OAuth to src/auth.ts and run the tests')).toBe(true);
+    expect(hasVerificationCriteria('add OAuth to src/auth.ts and run all tests')).toBe(true);
+  });
+
+  it('detects "verify" and "check that/it/the"', () => {
+    expect(hasVerificationCriteria('fix the login bug then verify it works')).toBe(true);
+    expect(hasVerificationCriteria('implement the endpoint and check that it returns 200')).toBe(true);
+    expect(hasVerificationCriteria('build the feature and check the output')).toBe(true);
+  });
+
+  it('detects "screenshot", "expected output", "failing test", "make sure"', () => {
+    expect(hasVerificationCriteria('implement this design and take a screenshot')).toBe(true);
+    expect(hasVerificationCriteria('fix the function so expected output matches')).toBe(true);
+    expect(hasVerificationCriteria('write a failing test then fix it')).toBe(true);
+    expect(hasVerificationCriteria('add the feature and make sure it works')).toBe(true);
+  });
+
+  it('does not flag outcome words that are not verification clauses', () => {
+    expect(hasVerificationCriteria('the button should submit the form')).toBe(false);
+    expect(hasVerificationCriteria('it needs to return null instead of throwing')).toBe(false);
+    expect(hasVerificationCriteria('add a retry mechanism to the API client')).toBe(false);
   });
 });
 
@@ -221,6 +250,29 @@ describe('analyze', () => {
     expect(result.totalOutputTokens).toBe(500);
   });
 
+  it('computes verificationRate only over implement+fix prompts', () => {
+    const project: ProjectData = {
+      name: 'test',
+      entries: [
+        // implement with verification → counts
+        makeEntry('user', 's1', 'add OAuth to src/auth.ts and run the tests'),
+        makeEntry('assistant', 's1', ''),
+        // implement without verification → counts, no flag
+        makeEntry('user', 's1', 'add a retry mechanism to the API client in src/client.ts'),
+        makeEntry('assistant', 's1', ''),
+        // fix with verification → counts
+        makeEntry('user', 's1', 'fix the login bug in src/auth.ts and verify it returns 200'),
+        makeEntry('assistant', 's1', ''),
+        // explain — not actionable, excluded from rate
+        makeEntry('user', 's1', 'explain how the cache invalidation works'),
+        makeEntry('assistant', 's1', ''),
+      ],
+    };
+    const result = analyze([project], 30);
+    // 3 actionable prompts (2 implement + 1 fix), 2 have verification
+    expect(result.verificationRate).toBeCloseTo(2 / 3);
+  });
+
   it('detects correction turns', () => {
     const project: ProjectData = {
       name: 'test',
@@ -248,6 +300,28 @@ describe('analyze', () => {
     const result = analyze([project], 30);
     expect(result.worstPrompts.length).toBeGreaterThan(0);
     expect(result.worstPrompts[0].vagueScore).toBeGreaterThanOrEqual(3);
+  });
+
+  it('builds slashCommands map with per-command counts', () => {
+    const project: ProjectData = {
+      name: 'test',
+      entries: [
+        makeEntry('user', 's1', '/clear'),
+        makeEntry('assistant', 's1', ''),
+        makeEntry('user', 's1', '/clear'),
+        makeEntry('assistant', 's1', ''),
+        makeEntry('user', 's1', '/plan add OAuth to src/auth.ts'),
+        makeEntry('assistant', 's1', ''),
+        makeEntry('user', 's1', 'fix the login bug in src/auth.ts'),
+        makeEntry('assistant', 's1', ''),
+      ],
+    };
+    const result = analyze([project], 30);
+    expect(result.slashCommands['/clear']).toBe(2);
+    expect(result.slashCommands['/plan']).toBe(1);
+    expect(result.slashCommands['/compact']).toBeUndefined();
+    // non-slash prompt should not appear
+    expect(Object.keys(result.slashCommands)).not.toContain('fix');
   });
 
   it('aggregates stats across multiple projects', () => {
