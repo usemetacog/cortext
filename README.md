@@ -27,6 +27,9 @@ Reflection for your Claude Code prompts.
 ╚════════════════════════════════════════════════════════════╝
 ```
 
+## Why this matters
+As AI tools level up, we should too. My hope is Cortext asks us to think, reflect, and action on what we observe and learn.
+
 ## Install
 
 **Option 1 — npx (zero install):**
