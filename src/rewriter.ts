@@ -54,17 +54,17 @@ export function heuristicDiagnosis(prompt: UserPrompt): string {
   const text = prompt.text;
   const fixes: string[] = [];
 
-  if (prompt.wordCount < 5) fixes.push(`at ${prompt.wordCount} words it's too short — Claude had to infer your intent`);
+  if (prompt.wordCount < 5) fixes.push(`too short to be actionable at ${prompt.wordCount} words — Claude had to infer your intent`);
   else if (prompt.wordCount < 10) fixes.push('too brief to act on without guessing');
 
-  if (!/[\/\.][a-z]/i.test(text)) fixes.push('add the file path so Claude knows exactly what to touch');
-  if (!/`[^`]+`/.test(text)) fixes.push('include the relevant symbol or snippet in backticks');
-  if (!/should|expected|want|need|instead/.test(text)) fixes.push('state the expected outcome: "should X", "expected Y", or "instead of Z"');
-  if (prompt.followedByCorrection) fixes.push('you had to redirect Claude right after — the prompt left too much to interpretation');
+  if (!/[\/\.][a-z]/i.test(text)) fixes.push('no file path — add it so Claude knows exactly what to touch');
+  if (!/`[^`]+`/.test(text)) fixes.push('no code reference — include the relevant symbol or snippet in backticks');
+  if (!/should|expected|want|need|instead/.test(text)) fixes.push('no expected outcome — state it: "should X", "expected Y", or "instead of Z"');
+  if (prompt.followedByCorrection) fixes.push('led directly to a correction turn — the prompt left too much to interpretation');
 
-  if (fixes.length === 0) return 'Prompt was flagged by the correction detector — review in context.';
+  if (fixes.length === 0) return 'Prompt was flagged — review manually.';
   return fixes.length === 1
-    ? fixes[0].charAt(0).toUpperCase() + fixes[0].slice(1) + '.'
+    ? fixes[0] + '.'
     : 'Several issues: ' + fixes.join('; ') + '.';
 }
 
