@@ -524,7 +524,9 @@ export function renderCoachReport(report: CoachReport, goal: Goal, days: number)
   ];
 
   for (const [label, key] of signals) {
-    const { score, note } = report.signalScores[key];
+    const signalData = report.signalScores[key];
+    if (!signalData) continue;
+    const { score, note } = signalData;
     const b = scoreBar(score);
     const scoreStr = `${score}/10`;
     out.push(line(`${chalk.dim(label)}  ${b}  ${scoreStr.padStart(4)}`));
