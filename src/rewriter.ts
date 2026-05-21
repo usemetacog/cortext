@@ -52,18 +52,20 @@ function setCache(text: string, result: RewriteResult): void {
 
 export function heuristicDiagnosis(prompt: UserPrompt): string {
   const text = prompt.text;
-  const issues: string[] = [];
+  const fixes: string[] = [];
 
-  if (prompt.wordCount < 5) issues.push('too short to be actionable');
-  else if (prompt.wordCount < 10) issues.push('too brief — missing context');
+  if (prompt.wordCount < 5) fixes.push(`at ${prompt.wordCount} words it's too short — Claude had to infer your intent`);
+  else if (prompt.wordCount < 10) fixes.push('too brief to act on without guessing');
 
-  if (!/[\/\.][a-z]/i.test(text)) issues.push('no file path');
-  if (!/`[^`]+`/.test(text)) issues.push('no code reference');
-  if (!/should|expected|want|need|instead/.test(text)) issues.push('no expected outcome');
-  if (prompt.followedByCorrection) issues.push('led directly to a correction turn');
+  if (!/[\/\.][a-z]/i.test(text)) fixes.push('add the file path so Claude knows exactly what to touch');
+  if (!/`[^`]+`/.test(text)) fixes.push('include the relevant symbol or snippet in backticks');
+  if (!/should|expected|want|need|instead/.test(text)) fixes.push('state the expected outcome: "should X", "expected Y", or "instead of Z"');
+  if (prompt.followedByCorrection) fixes.push('you had to redirect Claude right after — the prompt left too much to interpretation');
 
-  if (issues.length === 0) return 'Prompt was flagged — review manually.';
-  return 'Missing: ' + issues.join(', ') + '.';
+  if (fixes.length === 0) return 'Prompt was flagged by the correction detector — review in context.';
+  return fixes.length === 1
+    ? fixes[0].charAt(0).toUpperCase() + fixes[0].slice(1) + '.'
+    : 'Several issues: ' + fixes.join('; ') + '.';
 }
 
 export async function generateRewrite(prompt: UserPrompt): Promise<RewriteResult | null> {

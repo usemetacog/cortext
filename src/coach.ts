@@ -19,6 +19,8 @@ Rubric for this persona:
 - Tool diversity: ${rubric.toolDiversity}
 - Front-loading context: ${rubric.frontloading}
 - Efficiency: ${rubric.efficiency}
+- Context management: Uses /clear between unrelated tasks; avoids kitchen-sink sessions (many turns on unrelated topics); uses /plan before complex changes; doesn't let context fill with failed approaches.
+- Verification habit: Includes explicit test/verify criteria in implement and fix prompts (e.g. "run tests after", "verify", "check that"). This is the single highest-leverage prompting habit per Claude Code best practices.
 
 You will receive their real prompting stats and their actual worst prompts. Assess them against the rubric.
 
@@ -35,11 +37,13 @@ Respond as raw JSON only. No markdown fences. Schema:
   "grade": "C+",
   "gradeReason": "one punchy sentence",
   "signalScores": {
-    "specificity":   { "score": 1-10, "note": "one sentence" },
-    "ownership":     { "score": 1-10, "note": "one sentence" },
-    "toolDiversity": { "score": 1-10, "note": "one sentence" },
-    "frontloading":  { "score": 1-10, "note": "one sentence" },
-    "efficiency":    { "score": 1-10, "note": "one sentence" }
+    "specificity":        { "score": 1-10, "note": "one sentence" },
+    "ownership":          { "score": 1-10, "note": "one sentence" },
+    "toolDiversity":      { "score": 1-10, "note": "one sentence" },
+    "frontloading":       { "score": 1-10, "note": "one sentence" },
+    "efficiency":         { "score": 1-10, "note": "one sentence" },
+    "contextManagement":  { "score": 1-10, "note": "one sentence" },
+    "verificationHabit":  { "score": 1-10, "note": "one sentence" }
   },
   "worstMoments": [
     { "original": "...", "diagnosis": "one sentence", "better": "rewritten prompt" }
@@ -54,6 +58,11 @@ function buildUserMessage(result: AnalysisResult): string {
     ? result.promptCategories.vague / result.totalPrompts
     : 0;
 
+  const actionableTotal = (result.promptCategories.implement ?? 0) + (result.promptCategories.fix ?? 0);
+  const clearCount = result.slashCommands['/clear'] ?? 0;
+  const planCount = result.slashCommands['/plan'] ?? 0;
+  const compactCount = result.slashCommands['/compact'] ?? 0;
+
   const lines: string[] = [
     `STATS (last ${result.daysAnalyzed} days):`,
     `- Sessions: ${result.totalSessions}, Prompts: ${result.totalPrompts}`,
@@ -63,7 +72,8 @@ function buildUserMessage(result: AnalysisResult): string {
     `- Vague prompts: ${pct(vagueRate)} (${result.promptCategories.vague} of ${result.totalPrompts})`,
     `- Tools used: ${result.toolDiversity} distinct tools — ${result.toolsUsed.join(', ') || 'none detected'}`,
     `- Total tool calls: ${result.totalToolCalls}`,
-    `- Slash command usage in prompts: ${result.slashCommandCount}`,
+    `- Slash commands: ${Object.values(result.slashCommands).reduce((a, b) => a + b, 0)} total — /clear: ${clearCount}, /plan: ${planCount}, /compact: ${compactCount}, /rewind: ${result.slashCommands['/rewind'] ?? 0}`,
+    `- Verification rate: ${pct(result.verificationRate)} of implement/fix prompts include explicit verify criteria (${actionableTotal} total implement/fix prompts)`,
     `- Cache hit rate: ${pct(result.cacheHitRate)}`,
     `- Total cost: $${result.totalCost.toFixed(2)}`,
     '',
@@ -79,7 +89,7 @@ function buildUserMessage(result: AnalysisResult): string {
       });
       lines.push(
         `  "${p.text.slice(0, 200)}" ` +
-        `[${ts}, ${p.projectName}, vague=${p.vagueScore}, correction=${p.followedByCorrection}]`
+        `[${ts}, ${p.projectName}, vague=${p.vagueScore}, correction=${p.followedByCorrection}, hasVerification=${p.hasVerification}]`
       );
     }
   }
@@ -90,7 +100,12 @@ function buildUserMessage(result: AnalysisResult): string {
 export async function runCoach(result: AnalysisResult, goal: Goal): Promise<CoachReport | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.error('\nANTHROPIC_API_KEY not set. Export it to use cortext review.\n');
+    console.error('\nThis feature calls the Anthropic API — separate from your Claude Code subscription.');
+    console.error('\nGet a free key at: https://console.anthropic.com  (free tier covers review usage)');
+    console.error('\nThen run:');
+    console.error('  export ANTHROPIC_API_KEY=sk-ant-...');
+    console.error('  npx cortext review');
+    console.error('\nTo make it permanent: add the export line to your ~/.zshrc or ~/.bashrc\n');
     process.exit(1);
   }
 

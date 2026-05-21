@@ -37,7 +37,7 @@ async function init() {
   // Stat cards
   const cacheColor = result.cacheHitRate > 0.5 ? 'green' : '';
   document.getElementById('stat-cards').innerHTML =
-    '<div class="stat-card"><div class="stat-label">Total Spend</div><div class="stat-value accent">$' + result.totalCost.toFixed(2) + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">API Equiv. Cost</div><div class="stat-value accent">$' + result.totalCost.toFixed(2) + '</div></div>' +
     '<div class="stat-card"><div class="stat-label">Sessions</div><div class="stat-value">' + result.totalSessions.toLocaleString() + '</div></div>' +
     '<div class="stat-card"><div class="stat-label">Prompts</div><div class="stat-value">' + result.totalPrompts.toLocaleString() + '</div></div>' +
     '<div class="stat-card"><div class="stat-label">Cache Hit Rate</div><div class="stat-value ' + cacheColor + '">' + (result.cacheHitRate * 100).toFixed(0) + '%</div></div>';
@@ -53,7 +53,7 @@ async function init() {
       var label = d.date.slice(5);
       chartHtml += '<div class="day-col">' +
         '<div class="day-bar-wrap" style="height:' + pct.toFixed(1) + '%">' +
-        '<div class="day-tooltip">' + esc(d.date) + '<br>$' + d.cost.toFixed(3) + '<br>' + d.sessions + ' session' + (d.sessions !== 1 ? 's' : '') + '</div>' +
+        '<div class="day-tooltip">' + esc(d.date) + '<br>~$' + d.cost.toFixed(3) + ' API equiv.<br>' + d.sessions + ' session' + (d.sessions !== 1 ? 's' : '') + '</div>' +
         '</div>' +
         '<div class="day-label">' + esc(label) + '</div>' +
         '</div>';
@@ -82,7 +82,7 @@ async function init() {
   for (var p = 0; p < projects.length; p++) {
     var proj = projects[p];
     var projPct = (proj.cost / maxProj) * 100;
-    projHtml += barRow(proj.name, projPct, '$' + proj.cost.toFixed(2), '');
+    projHtml += barRow(proj.name, projPct, '~$' + proj.cost.toFixed(2), '');
   }
   document.getElementById('projects-chart').innerHTML = projHtml || '<div style="color:var(--muted)">No data</div>';
 
@@ -94,8 +94,21 @@ async function init() {
     '<div class="signal-row"><span class="signal-name">Median prompt length</span><span class="signal-val ' + wordCls + '">' + result.avgPromptWords + ' words</span></div>' +
     '<div class="signal-row"><span class="signal-name">Correction rate</span><span class="signal-val ' + corrCls + '">' + corrPct + '%</span></div>' +
     '<div class="signal-row"><span class="signal-name">Tool diversity</span><span class="signal-val">' + (result.toolsUsed ? result.toolsUsed.length : 0) + ' tools</span></div>' +
-    '<div class="signal-row"><span class="signal-name">Slash commands</span><span class="signal-val">' + result.slashCommandCount + '</span></div>' +
-    '<div class="signal-row"><span class="signal-name">Median first-msg words</span><span class="signal-val">' + result.medianFirstMessageWords + '</span></div>';
+    '<div class="signal-row"><span class="signal-name">Slash commands</span><span class="signal-val">' + Object.values(result.slashCommands ?? {}).reduce(function(a, b) { return a + b; }, 0) + '</span></div>' +
+    (function() {
+      var KEY_CMDS = ['/clear', '/plan', '/compact', '/rewind'];
+      var cmds = result.slashCommands ?? {};
+      var parts = KEY_CMDS.filter(function(c) { return cmds[c] > 0; }).map(function(c) { return c + ' \xd7' + cmds[c]; });
+      return parts.length > 0 ? '<div class="signal-row"><span class="signal-name" style="font-size:0.85em;opacity:0.7">  breakdown</span><span class="signal-val" style="font-size:0.85em;opacity:0.7">' + parts.join('  ') + '</span></div>' : '';
+    })() +
+    '<div class="signal-row"><span class="signal-name">Median first-msg words</span><span class="signal-val">' + result.medianFirstMessageWords + '</span></div>' +
+    (function() {
+      var actionable = (result.promptCategories.implement || 0) + (result.promptCategories.fix || 0);
+      if (actionable === 0) return '';
+      var verPct = Math.round((result.verificationRate || 0) * 100);
+      var verCls = verPct >= 50 ? 'good' : verPct < 20 ? 'bad' : 'warn';
+      return '<div class="signal-row"><span class="signal-name">Verification rate</span><span class="signal-val ' + verCls + '">' + verPct + '%</span></div>';
+    })();
 
   // Output ratio panel
   if (result.medianOutputRatio !== null && result.medianOutputRatio !== undefined) {
@@ -497,7 +510,7 @@ const HTML = `<!DOCTYPE html>
   <div id="app">
     <div class="stat-cards" id="stat-cards"></div>
     <div class="card">
-      <div class="card-title">Daily Spend</div>
+      <div class="card-title">Daily API Cost</div>
       <div class="daily-outer" id="daily-chart"></div>
     </div>
     <div class="two-col">
@@ -506,7 +519,7 @@ const HTML = `<!DOCTYPE html>
         <div id="categories-chart"></div>
       </div>
       <div class="card">
-        <div class="card-title">Top Projects by Spend</div>
+        <div class="card-title">Top Projects by API Cost</div>
         <div id="projects-chart"></div>
       </div>
     </div>

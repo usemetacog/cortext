@@ -74,7 +74,10 @@ export function classifyPrompt(text: string): PromptCategory {
   return 'other';
 }
 
-export function vagueScore(text: string): number {
+export function vagueScore(
+  text: string,
+  ctx?: { turnIndex: number; priorUserWords: number },
+): number {
   const words = text.trim().split(/\s+/).length;
   // Long messages or conversational replies are never flagged
   if (words > 200 || CONVERSATIONAL.test(text.trim())) return 0;
@@ -85,10 +88,22 @@ export function vagueScore(text: string): number {
   if (!/[\/\.][a-z]/i.test(text)) score += 1;            // no file path
   if (!/`[^`]+`/.test(text)) score += 1;                 // no inline code
   if (!/should|expected|want|need|instead/.test(text)) score += 1; // no expected outcome
-  return score;
+  // Context discounts: short follow-ups in an established conversation are intentional
+  if (ctx) {
+    if (ctx.turnIndex > 0) score -= 1;        // not the session opener
+    if (ctx.priorUserWords > 30) score -= 2;  // prior message established substantial context
+  }
+  return Math.max(0, score);
 }
 
 const SLASH_CMD = /^\/[a-zA-Z][a-zA-Z-]*/;
+
+// Strict verification signal: only explicit test/check/verify language, not outcome words like "should"
+const VERIFICATION_RE = /\b(run (the |all )?tests?|verify|check (that|it|the)\b|screenshot|expected output|failing test|make sure (it|the|that))\b/i;
+
+export function hasVerificationCriteria(text: string): boolean {
+  return VERIFICATION_RE.test(text);
+}
 
 // ── "Did you read my response?" detection ─────────────────────
 
@@ -153,7 +168,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
   const sessions = new Map<string, SessionStats>();
   const allToolCalls: string[] = [];
   const firstMessageWordCounts: number[] = [];
-  let slashCommandCount = 0;
+  const slashCommandMap = new Map<string, number>();
 
   for (const project of projects) {
     const sessionEntries = new Map<string, RawEntry[]>();
@@ -245,10 +260,11 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
             if (sessionFirstUserMessageWords === null) {
               sessionFirstUserMessageWords = text.split(/\s+/).length;
             }
-            if (SLASH_CMD.test(text.trim())) {
-              slashCommandCount++;
+            const slashMatch = text.trim().match(SLASH_CMD);
+            if (slashMatch) {
+              const cmd = slashMatch[0].toLowerCase();
+              slashCommandMap.set(cmd, (slashCommandMap.get(cmd) ?? 0) + 1);
             }
-            sessionPromptVagueScores.push(vagueScore(text));
           }
         }
       }
@@ -290,7 +306,8 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
         }
       }
 
-      // Record user prompts
+      // Record user prompts (also collects context-aware vague scores)
+      let userTurnIndex = 0;
       for (let i = 0; i < messageSequence.length; i++) {
         const msg = messageSequence[i];
         if (msg.role !== 'user') continue;
@@ -316,15 +333,31 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           ? extractMessageText(nextMsg.role, nextMsg.text, nextMsg.entry)
           : undefined;
 
+        // Find the most recent prior user message word count for context discount
+        let priorUserWords = 0;
+        for (let j = i - 1; j >= 0; j--) {
+          if (messageSequence[j].role === 'user') {
+            priorUserWords = messageSequence[j].text.split(/\s+/).length;
+            break;
+          }
+        }
+
+        const ctx = { turnIndex: userTurnIndex, priorUserWords };
+        const score = vagueScore(text, ctx);
+        sessionPromptVagueScores.push(score);
+        userTurnIndex++;
+
+        const category = classifyPrompt(text);
         allPrompts.push({
           text,
           timestamp: ts,
           sessionId,
           projectName: project.name,
           wordCount: text.split(/\s+/).length,
-          category: classifyPrompt(text),
-          vagueScore: vagueScore(text),
+          category,
+          vagueScore: score,
           followedByCorrection: followedByCorrection || correctedAfterResponse,
+          hasVerification: (category === 'implement' || category === 'fix') && hasVerificationCriteria(text),
           contextBefore: contextBefore || undefined,
           contextAfter: contextAfter || undefined,
         });
@@ -472,6 +505,11 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
   };
   const medianOutputRatio = median(scoredSessions.map(s => s.outputRatio!));
 
+  const actionablePrompts = allPrompts.filter(p => p.category === 'implement' || p.category === 'fix');
+  const verificationRate = actionablePrompts.length > 0
+    ? actionablePrompts.filter(p => p.hasVerification).length / actionablePrompts.length
+    : 0;
+
   return {
     totalSessions: sessions.size,
     totalPrompts: allPrompts.length,
@@ -492,8 +530,9 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     toolsUsed,
     toolDiversity,
     totalToolCalls,
-    slashCommandCount,
+    slashCommands: Object.fromEntries(slashCommandMap),
     medianFirstMessageWords,
+    verificationRate,
     outputRatioByBucket,
     medianOutputRatio,
   };

@@ -15,7 +15,7 @@ import { logRewriteShown, checkAndLogOutcomes, loadOutcomeInsight } from './eval
 import { generateUnreadCallout } from './unread';
 import { startWebServer } from './server';
 import { runQuiz } from './quiz';
-import type { Goal, GoalRubric } from './types';
+import type { Goal, GoalRubric, PeriodDelta } from './types';
 
 const USAGE = `
 Usage: npx cortext [command] [options]
@@ -96,7 +96,7 @@ Respond as raw JSON only. No markdown fences. Schema:
   }
 }
 
-async function runGoalWizard(): Promise<void> {
+async function runGoalWizard(): Promise<Goal | null> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   rl.on('SIGINT', () => { console.log('\n'); rl.close(); process.exit(0); });
 
@@ -131,7 +131,7 @@ async function runGoalWizard(): Promise<void> {
     if (!description) {
       console.log(chalk.dim('\nNo input — goal not saved.\n'));
       rl.close();
-      return;
+      return null;
     }
     console.log(chalk.dim('\nDeriving rubric…'));
     const rubric = await deriveCustomRubric(description);
@@ -159,20 +159,20 @@ async function runGoalWizard(): Promise<void> {
   console.log('');
   console.log(chalk.green('✓') + ' Goal set: ' + chalk.white.bold(goal.label));
   if (goal.customization) console.log(chalk.dim('  "' + goal.customization + '"'));
-  console.log(chalk.dim('Run ') + chalk.white('npx cortext review') + chalk.dim(' to get your first coaching report.'));
   console.log('');
 
   rl.close();
+  return goal;
 }
 
 async function runReview(days: number, force: boolean): Promise<void> {
-  const goal = loadGoal();
+  let goal = loadGoal();
   if (!goal) {
     console.log('');
-    console.log(chalk.yellow('No active goal set.'));
-    console.log(chalk.dim('Run ') + chalk.white('npx cortext goal') + chalk.dim(' to set one first.'));
-    console.log('');
-    return;
+    console.log(chalk.yellow('No goal set yet — let\'s do that now.'));
+    goal = await runGoalWizard();
+    if (!goal) return;
+    console.log(chalk.dim('Running your first review…\n'));
   }
 
   if (!force && isInCooldown()) {
@@ -274,7 +274,8 @@ async function main(): Promise<void> {
   }
 
   if (command === 'goal') {
-    await runGoalWizard();
+    const g = await runGoalWizard();
+    if (g) console.log(chalk.dim('Run ') + chalk.white('npx cortext review') + chalk.dim(' to get your first coaching report.\n'));
     return;
   }
 
@@ -300,6 +301,30 @@ async function main(): Promise<void> {
   }
 
   const result = analyze(projects, days);
+
+  // Compute prior period for period-over-period deltas
+  const priorProjects = readProjects(days, days);
+  const priorResult = priorProjects.length > 0 ? analyze(priorProjects, days) : null;
+
+  const MIN_PRIOR_SESSIONS = 10;
+  let delta: PeriodDelta | undefined;
+  if (priorResult && priorResult.totalSessions >= MIN_PRIOR_SESSIONS) {
+    delta = {
+      costPct: priorResult.totalCost > 0
+        ? (result.totalCost - priorResult.totalCost) / priorResult.totalCost
+        : null,
+      cacheHitRatePp: (result.cacheHitRate - priorResult.cacheHitRate) * 100,
+      medianWordsDelta: result.avgPromptWords - priorResult.avgPromptWords,
+      priorSessions: priorResult.totalSessions,
+    };
+  } else {
+    delta = {
+      costPct: null,
+      cacheHitRatePp: null,
+      medianWordsDelta: null,
+      priorSessions: priorResult?.totalSessions ?? 0,
+    };
+  }
 
   const vagueRate = result.promptCategories.vague / (result.totalPrompts || 1);
   checkAndLogOutcomes(result.correctionRate, vagueRate);
@@ -330,7 +355,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  render(result, worstPromptData, loadOutcomeInsight());
+  render(result, worstPromptData, loadOutcomeInsight(), delta);
 
   // show active goal hint if set
   const goal = loadGoal();

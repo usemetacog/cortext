@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import type { AnalysisResult, CoachReport, DailyUsage, Goal, PromptCategory, RewriteResult, UserPrompt } from './types';
+import type { AnalysisResult, CoachReport, DailyUsage, Goal, PeriodDelta, PromptCategory, RewriteResult, UserPrompt } from './types';
 
 export interface WorstPromptData {
   prompt: UserPrompt;
@@ -87,7 +87,40 @@ const CATEGORY_ORDER: PromptCategory[] = [
   'fix', 'implement', 'explain', 'refactor', 'question', 'vague', 'other',
 ];
 
-export function render(result: AnalysisResult, worstPromptData?: WorstPromptData, evalInsight?: string | null): void {
+// ── Period-over-period delta helpers ──────────────────────────
+
+const NOISE_PP = 2;   // ±2pp considered unchanged
+const NOISE_PCT = 5;  // ±5% considered unchanged for cost
+
+/**
+ * Format a delta tag like "▲ +12%" or "▼ -5pp" or "→ –"
+ * higherIsBetter: true for cache hit rate (up = good), false for cost/vague/correction (down = good)
+ */
+function deltaTag(
+  value: number | null,
+  unit: 'pct' | 'pp',
+  higherIsBetter: boolean,
+  noiseThreshold: number,
+): string {
+  if (value === null) return chalk.dim('→ –');
+  const absVal = Math.abs(value);
+  if (absVal < noiseThreshold) return chalk.dim('→ –');
+
+  const improved = higherIsBetter ? value > 0 : value < 0;
+  const sign = value > 0 ? '+' : '';
+  const formatted =
+    unit === 'pct'
+      ? `${sign}${Math.round(value)}%`
+      : `${sign}${value.toFixed(0)}pp`;
+
+  if (improved) {
+    return chalk.green(`▼ ${formatted}`);
+  } else {
+    return chalk.red(`▲ ${formatted}`);
+  }
+}
+
+export function render(result: AnalysisResult, worstPromptData?: WorstPromptData, evalInsight?: string | null, delta?: PeriodDelta): void {
   const lines: string[] = [];
 
   lines.push(top());
@@ -106,11 +139,24 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
   lines.push(line(chalk.dim(`${daysStr}  ·  ${sessionsStr}  ·  ${promptsStr}`)));
   lines.push(blank());
 
-  const costLabel  = 'Total spend:';
+  // Build delta tags when available
+  const hasDelta = delta !== undefined;
+  const costTag       = hasDelta ? deltaTag(delta!.costPct !== null ? delta!.costPct * 100 : null, 'pct', false, NOISE_PCT) : '';
+  const cacheTag      = hasDelta ? deltaTag(delta!.cacheHitRatePp, 'pp', true, NOISE_PP) : '';
+  const wordsTag      = hasDelta ? deltaTag(delta!.medianWordsDelta, 'pp', true, 2) : '';
+
+  // Render overview metrics with optional delta tags inline
+  const costLabel  = 'API equiv. cost:';
   const cacheLabel = 'Cache hit rate:';
-  const costVal    = chalk.green.bold(formatCost(result.totalCost));
-  const cacheVal   = chalk.yellow.bold(pct(result.cacheHitRate));
-  lines.push(line(`${costLabel.padEnd(16)}${formatCost(result.totalCost).padEnd(14)}${cacheLabel.padEnd(17)}${pct(result.cacheHitRate)}`));
+
+  if (hasDelta) {
+    // Each metric on its own line with delta tag
+    lines.push(line(`${costLabel.padEnd(18)}${formatCost(result.totalCost).padEnd(10)}${costTag}`));
+    lines.push(line(`${cacheLabel.padEnd(18)}${pct(result.cacheHitRate).padEnd(10)}${cacheTag}`));
+    lines.push(line(`${'Median prompt len:'.padEnd(18)}${(Math.round(result.avgPromptWords) + ' words').padEnd(10)}${wordsTag}`));
+  } else {
+    lines.push(line(`${costLabel.padEnd(16)}${formatCost(result.totalCost).padEnd(14)}${cacheLabel.padEnd(17)}${pct(result.cacheHitRate)}`));
+  }
 
   const inputLabel  = 'Input tokens:';
   const outputLabel = 'Output tokens:';
@@ -161,6 +207,24 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
   const avgWords = Math.round(result.avgPromptWords);
   lines.push(line(`Median prompt length:  ${chalk.white(avgWords + ' words')}`));
   lines.push(line(`Correction rate:    ${chalk.white(pct(result.correctionRate) + ' of sessions')}`));
+
+  const slashTotal = Object.values(result.slashCommands).reduce((a, b) => a + b, 0);
+  if (slashTotal > 0) {
+    const KEY_CMDS = ['/clear', '/plan', '/compact', '/rewind'];
+    const keyCounts = KEY_CMDS
+      .map(cmd => ({ cmd, n: result.slashCommands[cmd] ?? 0 }))
+      .filter(x => x.n > 0)
+      .map(x => `${x.cmd} ×${x.n}`)
+      .join('  ');
+    const breakdown = keyCounts ? chalk.dim(`  (${keyCounts})`) : '';
+    lines.push(line(`Slash commands:     ${chalk.white(String(slashTotal))}${breakdown}`));
+  }
+
+  const actionableTotal = (result.promptCategories.implement ?? 0) + (result.promptCategories.fix ?? 0);
+  if (actionableTotal > 0) {
+    const verifiedCount = Math.round(result.verificationRate * actionableTotal);
+    lines.push(line(`Verification rate:  ${chalk.white(pct(result.verificationRate))} of implement/fix prompts  ${chalk.dim(`(${verifiedCount}/${actionableTotal})`)}`));
+  }
   lines.push(blank());
 
   const vagueCount = result.promptCategories.vague;
@@ -171,6 +235,18 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
   }
   if (correctedSessions > 0) {
     lines.push(line(chalk.yellow(`[!] ${correctedSessions} session${correctedSessions !== 1 ? 's' : ''} had correction turns`)));
+  }
+  if (actionableTotal >= 5 && result.verificationRate < 0.2) {
+    lines.push(line(chalk.yellow(`[!] Only ${pct(result.verificationRate)} of implement/fix prompts include verification`)));
+  } else if (actionableTotal >= 5 && result.verificationRate >= 0.5) {
+    lines.push(line(chalk.green(`[✓] Verification criteria in ${pct(result.verificationRate)} of implement/fix prompts`)));
+  }
+  const clearCount = result.slashCommands['/clear'] ?? 0;
+  if (clearCount > 0 && result.totalSessions > 0) {
+    const clearPerSession = clearCount / result.totalSessions;
+    if (clearPerSession >= 0.3) {
+      lines.push(line(chalk.green(`[✓] Using /clear regularly (${clearCount}× across ${result.totalSessions} sessions)`)));
+    }
   }
   if (result.cacheHitRate >= 0.8) {
     lines.push(line(chalk.green(`[✓] Excellent cache hit rate (${pct(result.cacheHitRate)})`)));
@@ -186,7 +262,7 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
   // Top projects by cost
   if (result.projectStats.length > 1) {
     lines.push(divider());
-    lines.push(sectionLabel('TOP PROJECTS BY SPEND'));
+    lines.push(sectionLabel('TOP PROJECTS BY API COST'));
 
     const maxProjectCost = Math.max(...result.projectStats.map(p => p.cost), 0.001);
     const BAR_W = 20;
@@ -364,7 +440,7 @@ export function renderAnalysisEntry(index: number, original: string, diagnosis: 
 }
 
 export function renderAnalysisFooter(): void {
-  console.log(line(chalk.dim('Tip: ') + chalk.white('Specificity = fewer correction turns, lower cost')));
+  console.log(line(chalk.dim('Tip: ') + chalk.white('Specificity = fewer correction turns, lower API cost')));
   console.log(chalk.dim('╚' + '═'.repeat(WIDTH - 2) + '╝'));
 }
 
@@ -443,6 +519,8 @@ export function renderCoachReport(report: CoachReport, goal: Goal, days: number)
     ['Tool diversity', 'toolDiversity'],
     ['Front-loading', 'frontloading'],
     ['Efficiency   ', 'efficiency'],
+    ['Ctx mgmt     ', 'contextManagement'],
+    ['Verification ', 'verificationHabit'],
   ];
 
   for (const [label, key] of signals) {
