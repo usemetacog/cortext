@@ -49,6 +49,54 @@ const CATEGORY_PATTERNS: Array<[PromptCategory, RegExp]> = [
   ['explain',   /\b(explain|how\s+does|what\s+is|what\s+does|describe|understand|why(?:\s+is|\s+does|\s+are)?|how\s+do|what\s+are|tell\s+me|walk\s+me)\b/i],
 ];
 
+// Claude Code built-in commands and common skill names that users may type without /
+const COMMAND_WORDS = new Set([
+  'review', 'verify', 'browse', 'run', 'plan', 'cortext', 'learn', 'freeze',
+  'unfreeze', 'ship', 'qa', 'guard', 'health', 'retro', 'investigate', 'init',
+  'gstack', 'codex', 'canary', 'scrape', 'benchmark', 'autoplan',
+  'clear', 'compact', 'doctor', 'help', 'model', 'config', 'memory', 'usage',
+  'login', 'logout', 'cost', 'bug', 'status', 'ide', 'vim',
+]);
+
+function editDistance(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+  return dp[m][n];
+}
+
+function isCommandLike(word: string): boolean {
+  const lower = word.toLowerCase();
+  if (COMMAND_WORDS.has(lower)) return true;
+  // Fuzzy: within edit distance 1 for words >= 4 chars (catches "reviw", "browsse")
+  if (lower.length >= 4) {
+    for (const cmd of COMMAND_WORDS) {
+      if (Math.abs(lower.length - cmd.length) <= 1 && editDistance(lower, cmd) === 1) return true;
+    }
+  }
+  return false;
+}
+
+function isGarbled(text: string): boolean {
+  const words = text.trim().split(/\s+/);
+  if (words.length > 2) return false;
+  for (const word of words) {
+    if (word.length < 6) continue;
+    if (/^[A-Z]+$/.test(word)) continue;   // likely an acronym (HTML, HTTP)
+    if (/[\/\.]/.test(word)) continue;     // file path or URL token
+    const lower = word.toLowerCase();
+    if (!/[aeiou]/.test(lower)) return true;          // no vowels at all
+    if (/[bcdfghjklmnpqrstvwxyz]{5,}/.test(lower)) return true; // implausible consonant run
+  }
+  return false;
+}
+
 export function classifyPrompt(text: string, priorAssistantText?: string): PromptCategory {
   const wordCount = text.trim().split(/\s+/).length;
 
@@ -65,6 +113,9 @@ export function classifyPrompt(text: string, priorAssistantText?: string): Promp
 
   // Direct answer to a preceding assistant question is not vague
   if (priorAssistantText && assistantAskedQuestion(priorAssistantText)) return 'other';
+
+  // Skill/command names typed without a slash, and garbled text, are not vague prompts
+  if ((wordCount === 1 && isCommandLike(text.trim())) || isGarbled(text)) return 'other';
 
   // Short prompts need a concrete anchor (file path or inline code) to escape the
   // vague gate — "fix auth.ts" is unambiguous; "make it work" is not
@@ -109,6 +160,9 @@ export function vagueScore(
   if (words > 200 || CONVERSATIONAL.test(text.trim())) return 0;
   // Direct answer to a preceding assistant question is never vague
   if (ctx?.priorAssistantText && assistantAskedQuestion(ctx.priorAssistantText)) return 0;
+  // Skill/command names and garbled text are not meaningful prompts to score
+  const wordCount = text.trim().split(/\s+/).length;
+  if ((wordCount === 1 && isCommandLike(text.trim())) || isGarbled(text)) return 0;
   let score = 0;
   if (words < 5)  score += 4;
   else if (words < 10) score += 2;
@@ -169,11 +223,17 @@ function extractMessageText(role: 'user' | 'assistant', text: string, entry: Raw
     if (typeof content === 'string') {
       raw = content;
     } else {
-      raw = (content as Array<{ type: string; text?: string }>)
+      const blocks = content as Array<{ type: string; text?: string; name?: string }>;
+      raw = blocks
         .filter(b => b.type === 'text')
         .map(b => b.text ?? '')
         .join('\n')
         .trim();
+      if (!raw) {
+        // Tool-only response — summarise what Claude invoked
+        const tools = blocks.filter(b => b.type === 'tool_use').map(b => b.name).filter(Boolean);
+        if (tools.length > 0) raw = `[used ${tools.join(', ')}]`;
+      }
     }
   }
   if (!raw) return '';
@@ -277,7 +337,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           daily.messages += 1;
           dailyMap.set(date, daily);
 
-          messageSequence.push({ role: 'assistant', text: '', entry });
+          messageSequence.push({ role: 'assistant', text: extractMessageText('assistant', '', entry, 3000), entry });
         }
 
         if (entry.type === 'user' && entry.message?.content) {

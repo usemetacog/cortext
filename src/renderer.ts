@@ -1,6 +1,12 @@
 import chalk from 'chalk';
 import type { AnalysisResult, CoachReport, DailyUsage, Goal, PeriodDelta, PromptCategory, RewriteResult, UserPrompt } from './types';
 
+function daysSince(dateStr: string): number {
+  const set = new Date(dateStr);
+  const now = new Date();
+  return Math.max(0, Math.floor((now.getTime() - set.getTime()) / 86_400_000));
+}
+
 export interface WorstPromptData {
   prompt: UserPrompt;
   rewrite: RewriteResult | null;
@@ -120,7 +126,7 @@ function deltaTag(
   }
 }
 
-export function render(result: AnalysisResult, worstPromptData?: WorstPromptData, evalInsight?: string | null, delta?: PeriodDelta): void {
+export function render(result: AnalysisResult, worstPromptData?: WorstPromptData, evalInsight?: string | null, delta?: PeriodDelta, goal?: Goal | null): void {
   const lines: string[] = [];
 
   lines.push(top());
@@ -275,6 +281,43 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
     }
   }
 
+  // Week in Review
+  {
+    const activeDays = result.dailyUsage.filter(d => d.cost > 0 || d.sessions > 0).length;
+    const bySession = [...result.projectStats]
+      .filter(p => p.sessions > 0)
+      .sort((a, b) => b.sessions - a.sessions);
+    const projectCount = bySession.length;
+
+    if (projectCount > 0) {
+      lines.push(divider());
+      lines.push(sectionLabel('WEEK IN REVIEW'));
+      lines.push(blank());
+
+      // Summary sentence
+      let summary: string;
+      if (projectCount === 1) {
+        summary = `Focused on ${chalk.white(bySession[0].name)} all week.`;
+      } else if (projectCount === 2) {
+        summary = `Worked on ${chalk.white(bySession[0].name)} and ${chalk.white(bySession[1].name)} across ${activeDays} active day${activeDays !== 1 ? 's' : ''}.`;
+      } else {
+        summary = `Touched ${chalk.white(String(projectCount))} projects — most active on ${chalk.white(bySession[0].name)}.`;
+      }
+      lines.push(line(summary));
+      lines.push(blank());
+
+      // Top projects by sessions
+      const maxSessions = Math.max(...bySession.map(p => p.sessions), 1);
+      const BAR_W = 14;
+      for (const ps of bySession.slice(0, 5)) {
+        const nameStr = ps.name.slice(0, 16).padEnd(16);
+        const sessStr = (String(ps.sessions) + ' session' + (ps.sessions !== 1 ? 's' : '')).padEnd(11);
+        const b = bar(ps.sessions / maxSessions, BAR_W);
+        lines.push(line(`${chalk.dim(nameStr)}  ${chalk.white(sessStr)}  ${chalk.dim(b)}`));
+      }
+    }
+  }
+
   // Worst prompt rewrite section
   if (worstPromptData) {
     const { prompt, rewrite, heuristic } = worstPromptData;
@@ -399,13 +442,43 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
     lines.push(line(`N=${nTotal} sessions scored  (${nSpecific} specific / ${nVague} vague)`));
   }
 
+  // Goal progress
+  if (goal) {
+    const daysActive = daysSince(goal.createdAt);
+    const corrPct = Math.round(result.correctionRate * 100);
+    const corrLabel =
+      corrPct <= 5  ? chalk.green('excellent') :
+      corrPct <= 15 ? chalk.yellow('on track') :
+                      chalk.red('needs work');
+
+    lines.push(divider());
+    lines.push(sectionLabel('GOAL PROGRESS'));
+    lines.push(blank());
+    lines.push(line(
+      chalk.white.bold(goal.label) +
+      chalk.dim(`  ·  set ${daysActive} day${daysActive !== 1 ? 's' : ''} ago`)
+    ));
+    if (goal.customization) {
+      for (const l of wrapText(`"${goal.customization}"`, INNER - 2)) {
+        lines.push(line(chalk.dim(l)));
+      }
+    }
+    lines.push(blank());
+    lines.push(line(`Correction rate:   ${chalk.white(corrPct + '%')}  ${corrLabel}`));
+    lines.push(line(`Sessions this week: ${chalk.white(String(result.totalSessions))}`));
+    lines.push(blank());
+    lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext review') + chalk.dim('  for your full coaching report')));
+  }
+
   lines.push(divider());
   if (evalInsight) {
     lines.push(line(chalk.dim(evalInsight)));
     lines.push(blank());
   }
   lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext --analyze') + chalk.dim('  for AI prompt improvement')));
-  lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext goal') + chalk.dim('       to set a coaching goal')));
+  if (!goal) {
+    lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext goal') + chalk.dim('       to set a coaching goal')));
+  }
   lines.push(bottom());
 
   console.log(lines.join('\n'));

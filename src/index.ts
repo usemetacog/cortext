@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import chalk from 'chalk';
 import { readProjects } from './reader';
 import { analyze } from './analyzer';
-import { render, renderCoachReport, renderGoalStatus } from './renderer';
+import { render, renderCoachReport } from './renderer';
 import type { WorstPromptData } from './renderer';
 import { analyzePrompts } from './suggester';
 import { runInteractive } from './interactive';
@@ -16,6 +16,31 @@ import { generateUnreadCallout } from './unread';
 import { startWebServer } from './server';
 import { runQuiz } from './quiz';
 import type { Goal, GoalRubric, PeriodDelta } from './types';
+
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+function createSpinner(text: string) {
+  let frame = 0;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const isTTY = process.stdout.isTTY;
+
+  return {
+    start() {
+      if (!isTTY) return;
+      process.stdout.write('\x1B[?25l'); // hide cursor
+      timer = setInterval(() => {
+        process.stdout.write(`\r${chalk.cyan(SPINNER_FRAMES[frame % SPINNER_FRAMES.length])} ${chalk.dim(text)}`);
+        frame++;
+      }, 80);
+    },
+    stop() {
+      if (!isTTY) return;
+      if (timer) clearInterval(timer);
+      process.stdout.write('\r\x1B[K'); // clear line
+      process.stdout.write('\x1B[?25h'); // show cursor
+    },
+  };
+}
 
 const USAGE = `
 Usage: npx cortext [command] [options]
@@ -290,9 +315,13 @@ async function main(): Promise<void> {
   }
 
   // default: dashboard
+  const spinner = createSpinner('Loading cortext…');
+  spinner.start();
+
   const projects = readProjects(days);
 
   if (projects.length === 0) {
+    spinner.stop();
     console.error(
       '\nNo Claude Code session data found in ~/.claude/projects/\n' +
       'Make sure you have Claude Code installed and have run at least one session.\n'
@@ -329,20 +358,8 @@ async function main(): Promise<void> {
   const vagueRate = result.promptCategories.vague / (result.totalPrompts || 1);
   checkAndLogOutcomes(result.correctionRate, vagueRate);
 
-  let worstPromptData: WorstPromptData | undefined;
-  if (result.worstPrompts.length > 0) {
-    const worst = result.worstPrompts[0];
-    const heuristic = heuristicDiagnosis(worst);
-    const rewrite = await generateRewrite(worst);
-    worstPromptData = { prompt: worst, rewrite, heuristic };
-    logRewriteShown(
-      hashPrompt(worst.text),
-      worst.vagueScore,
-      worst.followedByCorrection,
-      result.correctionRate,
-      vagueRate,
-    );
-  }
+  // HIDDEN: worst prompt of the week — scope too large, revisit later
+  const worstPromptData: WorstPromptData | undefined = undefined;
 
   if (result.unreadMoments.length > 0 && process.env.ANTHROPIC_API_KEY) {
     for (const moment of result.unreadMoments) {
@@ -350,18 +367,15 @@ async function main(): Promise<void> {
     }
   }
 
+  spinner.stop();
+
   if (shouldWeb) {
     startWebServer(result, worstPromptData, days);
     return;
   }
 
-  render(result, worstPromptData, loadOutcomeInsight(), delta);
-
-  // show active goal hint if set
   const goal = loadGoal();
-  if (goal) {
-    renderGoalStatus(goal);
-  }
+  render(result, worstPromptData, loadOutcomeInsight(), delta, goal);
 
   if (shouldAnalyze) {
     if (result.worstPrompts.length === 0) {

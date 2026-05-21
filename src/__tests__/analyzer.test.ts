@@ -52,6 +52,28 @@ describe('classifyPrompt', () => {
     expect(classifyPrompt('do this', 'Which approach do you want?')).toBe('other');
   });
 
+  it('classifies skill/command names typed without a slash as other', () => {
+    expect(classifyPrompt('review')).toBe('other');
+    expect(classifyPrompt('browse')).toBe('other');
+    expect(classifyPrompt('cortext')).toBe('other');
+    expect(classifyPrompt('verify')).toBe('other');
+  });
+
+  it('classifies near-miss command names as other', () => {
+    expect(classifyPrompt('reviw')).toBe('other');   // edit distance 1 from "review"
+    expect(classifyPrompt('browsse')).toBe('other'); // edit distance 1 from "browse"
+  });
+
+  it('classifies garbled single-word prompts as other', () => {
+    expect(classifyPrompt('asdfjkl')).toBe('other');   // no vowels
+    expect(classifyPrompt('sdfghjkl')).toBe('other');  // consecutive consonants
+  });
+
+  it('does not flag short acronyms or real words as garbled', () => {
+    expect(classifyPrompt('HTML')).not.toBe('other'); // all-caps acronym
+    expect(classifyPrompt('byte')).not.toBe('other'); // real word
+  });
+
   it('classifies short conversational replies as other', () => {
     expect(classifyPrompt('ok')).toBe('other');
     expect(classifyPrompt('sounds good')).toBe('other');
