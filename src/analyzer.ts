@@ -49,7 +49,7 @@ const CATEGORY_PATTERNS: Array<[PromptCategory, RegExp]> = [
   ['explain',   /\b(explain|how\s+does|what\s+is|what\s+does|describe|understand|why(?:\s+is|\s+does|\s+are)?|how\s+do|what\s+are|tell\s+me|walk\s+me)\b/i],
 ];
 
-export function classifyPrompt(text: string): PromptCategory {
+export function classifyPrompt(text: string, priorAssistantText?: string): PromptCategory {
   const wordCount = text.trim().split(/\s+/).length;
 
   // Long messages (pastes, detailed context) are never vague
@@ -63,7 +63,20 @@ export function classifyPrompt(text: string): PromptCategory {
   // Skip short conversational follow-ups from vague classification
   if (wordCount <= 8 && CONVERSATIONAL.test(text.trim())) return 'other';
 
-  if (wordCount < 6) return 'vague';
+  // Direct answer to a preceding assistant question is not vague
+  if (priorAssistantText && assistantAskedQuestion(priorAssistantText)) return 'other';
+
+  // Short prompts need a concrete anchor (file path or inline code) to escape the
+  // vague gate — "fix auth.ts" is unambiguous; "make it work" is not
+  if (wordCount < 6) {
+    const hasAnchor = /[\/\.][a-z]/i.test(text) || /`[^`]+`/.test(text);
+    if (hasAnchor) {
+      for (const [category, pattern] of CATEGORY_PATTERNS) {
+        if (pattern.test(text)) return category;
+      }
+    }
+    return 'vague';
+  }
 
   for (const [category, pattern] of CATEGORY_PATTERNS) {
     if (pattern.test(text)) return category;
@@ -74,13 +87,28 @@ export function classifyPrompt(text: string): PromptCategory {
   return 'other';
 }
 
+// Detect when the prior assistant turn was a question or choice prompt,
+// making a short user reply a direct answer rather than a vague prompt.
+function assistantAskedQuestion(text: string): boolean {
+  const trimmed = text.trimEnd();
+  // Ends with a question mark (possibly inside markdown or parens)
+  if (/\?\s*[)"'\`]?\s*$/.test(trimmed)) return true;
+  // Presents an "X or Y?" choice even mid-sentence
+  if (/ or /i.test(trimmed) && /\?/.test(trimmed)) return true;
+  // Common decision-request phrases without a literal ?
+  if (/\b(which (do you|would you|should (i|we))|do you want|yes or no|shall i|should i proceed|confirm|choose)\b/i.test(trimmed)) return true;
+  return false;
+}
+
 export function vagueScore(
   text: string,
-  ctx?: { turnIndex: number; priorUserWords: number },
+  ctx?: { turnIndex: number; priorUserWords: number; priorAssistantText?: string },
 ): number {
   const words = text.trim().split(/\s+/).length;
   // Long messages or conversational replies are never flagged
   if (words > 200 || CONVERSATIONAL.test(text.trim())) return 0;
+  // Direct answer to a preceding assistant question is never vague
+  if (ctx?.priorAssistantText && assistantAskedQuestion(ctx.priorAssistantText)) return 0;
   let score = 0;
   if (words < 5)  score += 4;
   else if (words < 10) score += 2;
@@ -342,12 +370,14 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           }
         }
 
-        const ctx = { turnIndex: userTurnIndex, priorUserWords };
+        const priorAssistantText =
+          prevMsg?.role === 'assistant' ? prevMsg.text : undefined;
+        const ctx = { turnIndex: userTurnIndex, priorUserWords, priorAssistantText };
         const score = vagueScore(text, ctx);
         sessionPromptVagueScores.push(score);
         userTurnIndex++;
 
-        const category = classifyPrompt(text);
+        const category = classifyPrompt(text, priorAssistantText);
         allPrompts.push({
           text,
           timestamp: ts,

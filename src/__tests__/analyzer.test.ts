@@ -34,6 +34,24 @@ describe('classifyPrompt', () => {
     expect(classifyPrompt('make it work')).toBe('vague');
   });
 
+  it('does not classify short prompts with a concrete anchor as vague', () => {
+    expect(classifyPrompt('fix auth.ts')).toBe('fix');
+    expect(classifyPrompt('add `getUserById`')).toBe('implement');
+    expect(classifyPrompt('refactor src/db.ts')).toBe('refactor');
+  });
+
+  it('still classifies short prompts without a concrete anchor as vague', () => {
+    expect(classifyPrompt('make it work')).toBe('vague');
+    expect(classifyPrompt('do this')).toBe('vague');
+    expect(classifyPrompt('add login')).toBe('vague');
+  });
+
+  it('classifies direct answers to assistant questions as other, not vague', () => {
+    expect(classifyPrompt('yes', 'Should I proceed with the refactor?')).toBe('other');
+    expect(classifyPrompt('usage', 'Is it usage based or per seat?')).toBe('other');
+    expect(classifyPrompt('do this', 'Which approach do you want?')).toBe('other');
+  });
+
   it('classifies short conversational replies as other', () => {
     expect(classifyPrompt('ok')).toBe('other');
     expect(classifyPrompt('sounds good')).toBe('other');
@@ -88,6 +106,16 @@ describe('vagueScore', () => {
 
   it('returns 0 for long messages', () => {
     expect(vagueScore('word '.repeat(201))).toBe(0);
+  });
+
+  it('returns 0 when prior assistant turn asked a question', () => {
+    expect(vagueScore('yes', { turnIndex: 1, priorUserWords: 5, priorAssistantText: 'Do you want usage-based or per-seat pricing?' })).toBe(0);
+    expect(vagueScore('usage', { turnIndex: 1, priorUserWords: 5, priorAssistantText: 'Is it usage based or per seat?' })).toBe(0);
+    expect(vagueScore('no', { turnIndex: 1, priorUserWords: 5, priorAssistantText: 'Should I proceed with the refactor?' })).toBe(0);
+  });
+
+  it('still scores vague when prior assistant turn was not a question', () => {
+    expect(vagueScore('update the component', { turnIndex: 1, priorUserWords: 5, priorAssistantText: 'Here is the updated file.' })).toBeGreaterThan(0);
   });
 });
 

@@ -231,7 +231,7 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
   const correctedSessions = Math.round(result.correctionRate * result.totalSessions);
 
   if (vagueCount > 0) {
-    lines.push(line(chalk.yellow(`[!] ${vagueCount} prompts were too short to be actionable`)));
+    lines.push(line(chalk.yellow(`[!] ${vagueCount} prompt${vagueCount !== 1 ? 's' : ''} may be too vague — no file path, code reference, or expected outcome`)));
   }
   if (correctedSessions > 0) {
     lines.push(line(chalk.yellow(`[!] ${correctedSessions} session${correctedSessions !== 1 ? 's' : ''} had correction turns`)));
