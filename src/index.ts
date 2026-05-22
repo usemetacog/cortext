@@ -1,4 +1,5 @@
 import * as readline from 'readline';
+import { existsSync } from 'fs';
 import Anthropic from '@anthropic-ai/sdk';
 import chalk from 'chalk';
 import { readProjects, detectSubagentSessions } from './reader';
@@ -334,12 +335,20 @@ async function main(): Promise<void> {
   const result = analyze(projects, days);
 
   // Harness health assembly
-  const topProject = [...result.projectStats].sort((a, b) => b.sessions - a.sessions)[0];
+  // Prefer the directory cortext is invoked from; fall back to the top project
+  // only when the current directory doesn't look like a project (no CLAUDE.md
+  // and no .claude/ subdir), e.g. when running from ~/ or /tmp.
+  const cwdLooksLikeProject =
+    existsSync(`${process.cwd()}/CLAUDE.md`) ||
+    existsSync(`${process.cwd()}/.claude`);
   let projectCwd = process.cwd();
-  if (topProject) {
-    const pd = projects.find(p => p.name === topProject.name);
-    const cwdEntry = pd?.entries.find(e => e.cwd);
-    if (cwdEntry?.cwd) projectCwd = cwdEntry.cwd;
+  if (!cwdLooksLikeProject) {
+    const topProject = [...result.projectStats].sort((a, b) => b.sessions - a.sessions)[0];
+    if (topProject) {
+      const pd = projects.find(p => p.name === topProject.name);
+      const cwdEntry = pd?.entries.find(e => e.cwd);
+      if (cwdEntry?.cwd) projectCwd = cwdEntry.cwd;
+    }
   }
   const configAudit = auditConfig(projectCwd);
   const behavioralProfile: BehavioralProfile = {
