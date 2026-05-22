@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import type { AnalysisResult, CoachReport, DailyUsage, Goal, PeriodDelta, PromptCategory, RewriteResult, UserPrompt } from './types';
+import type { HarnessScore } from './harness';
 
 function daysSince(dateStr: string): number {
   const set = new Date(dateStr);
@@ -126,7 +127,7 @@ function deltaTag(
   }
 }
 
-export function render(result: AnalysisResult, worstPromptData?: WorstPromptData, evalInsight?: string | null, delta?: PeriodDelta, goal?: Goal | null): void {
+export function render(result: AnalysisResult, worstPromptData?: WorstPromptData, evalInsight?: string | null, delta?: PeriodDelta, goal?: Goal | null, harnessScore?: HarnessScore): void {
   const lines: string[] = [];
 
   lines.push(top());
@@ -468,6 +469,93 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
     lines.push(line(`Sessions this week: ${chalk.white(String(result.totalSessions))}`));
     lines.push(blank());
     lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext review') + chalk.dim('  for your full coaching report')));
+  }
+
+  // Harness health panel
+  if (harnessScore) {
+    const hs = harnessScore;
+    const scoreColor = hs.overall >= 70 ? chalk.green : hs.overall >= 40 ? chalk.yellow : chalk.red;
+    lines.push(divider());
+    lines.push(sectionLabel('HARNESS HEALTH'));
+    lines.push(blank());
+    lines.push(line(
+      `Score: ${scoreColor(String(hs.overall) + '/100')}` +
+      chalk.dim(`  [config ${hs.configScore} · behavioral ${hs.behavioralScore}]`)
+    ));
+    lines.push(blank());
+
+    const tick = (v: boolean) => v ? chalk.green('✓') : chalk.red('✗');
+    const cfg = hs.config;
+    const beh = hs.behavioral;
+
+    lines.push(line(chalk.dim('Config')));
+    const mdDetail = cfg.claudeMdWordCount !== null ? chalk.dim(` (${cfg.claudeMdWordCount} words)`) : '';
+    lines.push(line(`  ${tick(cfg.hasRootClaudeMd)} CLAUDE.md${mdDetail}`));
+    lines.push(line(`  ${tick(cfg.hasHooks.stop)} stop hook`));
+    lines.push(line(`  ${tick(cfg.hasHooks.preToolUse || cfg.hasHooks.postToolUse)} pre/post tool hook`));
+    lines.push(line(`  ${tick(cfg.hasClaudeIgnore)} .claudeignore`));
+    lines.push(line(`  ${tick(cfg.hasDenyPermissions)} deny permissions`));
+    lines.push(line(`  ${tick(cfg.mcpServerCount > 0)} MCP servers${cfg.mcpServerCount > 0 ? chalk.dim(` (${cfg.mcpServerCount})`) : ''}`));
+    lines.push(blank());
+
+    lines.push(line(chalk.dim('Behavioral')));
+
+    // Subagent row + output ratio correlation
+    lines.push(line(`  ${tick(beh.subagentSessionCount > 0)} subagent sessions${beh.subagentSessionCount > 0 ? chalk.dim(` (${beh.subagentSessionCount})`) : ''}`));
+    if (result.subagentCorrelation) {
+      const sc = result.subagentCorrelation;
+      if (sc.subagentOutputRatio !== null && sc.singleAgentOutputRatio !== null) {
+        const diffPct = sc.singleAgentOutputRatio > 0
+          ? (sc.subagentOutputRatio - sc.singleAgentOutputRatio) / sc.singleAgentOutputRatio * 100
+          : 0;
+        const diffStr = (diffPct >= 0 ? '+' : '') + diffPct.toFixed(0) + '%';
+        const diffColor = diffPct >= 5 ? chalk.green : diffPct <= -5 ? chalk.red : chalk.dim;
+        lines.push(line(
+          `    ${chalk.dim('└ output ratio ')}` +
+          chalk.white(sc.subagentOutputRatio.toFixed(2)) +
+          chalk.dim(' vs ') +
+          chalk.white(sc.singleAgentOutputRatio.toFixed(2)) +
+          chalk.dim(' single-agent  ') +
+          diffColor(diffStr)
+        ));
+      } else if (sc.singleAgentOutputRatio !== null) {
+        lines.push(line(
+          `    ${chalk.dim('└ output ratio ')}${chalk.white(sc.singleAgentOutputRatio.toFixed(2))}` +
+          chalk.dim('  (no subagent sessions to compare)')
+        ));
+      }
+    }
+
+    const compDetail = beh.compactionEventCount > 0
+      ? chalk.dim(` (${beh.compactionEventCount}  auto: ${beh.autoCompactionCount} / manual: ${beh.manualCompactionCount})`)
+      : '';
+    lines.push(line(`  ${tick(beh.compactionEventCount > 0)} compaction events${compDetail}`));
+    lines.push(line(`  ${tick(beh.toolNamespaceCount > 1)} tool diversity${chalk.dim(` (${beh.toolNamespaceCount} namespaces)`)}`));
+
+    // Context pressure ↔ correction rate correlation
+    if (result.contextPressureCorrelation && result.contextPressureCorrelation.pressureSessions >= 2) {
+      const cp = result.contextPressureCorrelation;
+      lines.push(blank());
+      const pressureLabel = `${cp.pressureSessions} session${cp.pressureSessions !== 1 ? 's' : ''} hit context pressure ${chalk.dim('(>80k tokens)')}`;
+      if (cp.pressureCorrectionRate !== null && cp.normalCorrectionRate !== null && cp.normalCorrectionRate > 0) {
+        const ratio = cp.pressureCorrectionRate / cp.normalCorrectionRate;
+        lines.push(line(`  ${chalk.yellow('↑')} ${pressureLabel}`));
+        lines.push(line(`    ${chalk.dim('└ ')}${chalk.yellow(ratio.toFixed(1) + '×')} ${chalk.dim('higher correction rate vs shorter sessions')}`));
+      } else if (cp.pressureCorrectionRate !== null && cp.pressureCorrectionRate > 0) {
+        lines.push(line(`  ${chalk.yellow('↑')} ${pressureLabel}`));
+        lines.push(line(`    ${chalk.dim('└ ')}${chalk.yellow(pct(cp.pressureCorrectionRate))} ${chalk.dim('correction rate (vs 0% in shorter sessions)')}`));
+      } else {
+        lines.push(line(`  ${chalk.dim('↑')} ${pressureLabel}`));
+      }
+    }
+
+    if (hs.strengths.length > 0) {
+      lines.push(blank());
+      lines.push(line(chalk.dim('Strengths: ') + chalk.green(hs.strengths.join(' · '))));
+    }
+    if (hs.missingComponents.length > 0) {
+      lines.push(line(chalk.dim('Missing:   ') + chalk.red(hs.missingComponents.join(' · '))));
+    }
   }
 
   lines.push(divider());

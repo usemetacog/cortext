@@ -9,7 +9,17 @@ const PROJECTS_DIR =
 
 export interface ProjectData {
   name: string;
+  dir: string;  // full path to this project's directory in ~/.claude/projects/
   entries: RawEntry[];
+}
+
+export function hasSubagentDir(projectDir: string, sessionId: string): boolean {
+  const subagentDir = join(projectDir, sessionId, 'subagents');
+  try {
+    return statSync(subagentDir).isDirectory() && readdirSync(subagentDir).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 export function readProjects(days: number, offsetDays = 0): ProjectData[] {
@@ -86,10 +96,68 @@ export function readProjects(days: number, offsetDays = 0): ProjectData[] {
       projectName = dirName.split("-").pop() ?? dirName;
     }
 
-    results.push({ name: projectName, entries });
+    results.push({ name: projectName, dir: projectDir, entries });
   }
 
   return results;
+}
+
+export function detectSubagentSessions(days: number, offsetDays = 0): number {
+  // Re-evaluate at call time so CORTEXT_DATA_DIR can be overridden in tests
+  const projectsDir = process.env.CORTEXT_DATA_DIR ?? join(homedir(), '.claude', 'projects');
+  if (!existsSync(projectsDir)) return 0;
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days - offsetDays);
+  const upperBound: Date | null = offsetDays > 0
+    ? (() => { const d = new Date(); d.setDate(d.getDate() - offsetDays); return d; })()
+    : null;
+
+  let count = 0;
+
+  let projectDirs: string[];
+  try {
+    projectDirs = readdirSync(projectsDir);
+  } catch {
+    return 0;
+  }
+
+  for (const dirName of projectDirs) {
+    const projectDir = join(projectsDir, dirName);
+    try {
+      if (!statSync(projectDir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+
+    let files: string[];
+    try {
+      files = readdirSync(projectDir).filter((f) => f.endsWith('.jsonl'));
+    } catch {
+      continue;
+    }
+
+    for (const file of files) {
+      const sessionId = file.slice(0, -'.jsonl'.length);
+      try {
+        const mtime = statSync(join(projectDir, file)).mtime;
+        if (mtime < cutoff) continue;
+        if (upperBound !== null && mtime >= upperBound) continue;
+      } catch {
+        continue;
+      }
+      const subagentDir = join(projectDir, sessionId, 'subagents');
+      try {
+        if (statSync(subagentDir).isDirectory() && readdirSync(subagentDir).length > 0) {
+          count++;
+        }
+      } catch {
+        // No subagents dir for this session — expected for most sessions
+      }
+    }
+  }
+
+  return count;
 }
 
 export function extractUserText(

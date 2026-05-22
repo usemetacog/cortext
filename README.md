@@ -24,6 +24,22 @@ Reflection for your Claude Code prompts.
 ║ [!] 109 prompts were too short to be actionable            ║
 ║ [!] 8 sessions had correction turns                        ║
 ║ [✓] Excellent cache hit rate (97%)                         ║
+╠════════════════════════════════════════════════════════════╣
+║ HARNESS HEALTH                                 Score: 68/100 ║
+║                                                            ║
+║ Config                                                     ║
+║   ✓ CLAUDE.md (312 words)                                  ║
+║   ✗ stop hook                                              ║
+║   ✗ pre/post tool hook                                     ║
+║   ✓ .claudeignore                                          ║
+║   ✓ deny permissions                                       ║
+║   ✓ MCP servers (3)                                        ║
+║                                                            ║
+║ Behavioral                                                 ║
+║   ✓ subagent sessions (12)                                 ║
+║     └ output ratio 4.21 vs 2.87 single-agent  +47%        ║
+║   ✓ compaction events (8  auto: 6 / manual: 2)             ║
+║   ✓ tool diversity (5 namespaces)                          ║
 ╚════════════════════════════════════════════════════════════╝
 ```
 
@@ -84,6 +100,8 @@ npx cortext --help
 
 **Did you read my response?** — moments where your follow-up question asked about something Claude's previous response already covered; add `ANTHROPIC_API_KEY` for a one-line callout on each catch
 
+**Harness health** — scored audit of how well your Claude Code setup follows Anthropic best practices (see below)
+
 ## Browser dashboard
 
 ```bash
@@ -113,6 +131,38 @@ Reviews are saved to `~/.cortext/reviews.json`. Running `npx cortext review` wit
 ```bash
 npx cortext review --force
 ```
+
+## Harness health
+
+```bash
+npx cortext   # harness health panel appears at the bottom of the TUI
+```
+
+Scores your Claude Code setup on a 0–100 scale, weighted 60% config / 40% behavioral, derived from [Anthropic's best practices](https://code.claude.com/docs/en/best-practices).
+
+**Config signals** (read from `~/.claude/settings.json` + `.claude/settings.json`):
+
+| Signal | Points |
+|---|---|
+| CLAUDE.md present | 25 |
+| CLAUDE.md length < 500 words (focused) | 15 |
+| Stop hook configured | 20 |
+| Pre/post tool hook configured | 10 |
+| `.claudeignore` present | 10 |
+| Deny permissions list | 10 |
+| MCP servers configured | 10 |
+
+**Behavioral signals** (derived from your 30-day JSONL history):
+
+| Signal | Points |
+|---|---|
+| Subagent sessions > 20% of total | 50 |
+| Any compaction events | 30 |
+| Tool diversity > 3 namespaces | 20 |
+
+The panel also surfaces two correlations when enough data is present:
+- **Subagent output ratio** — compares output tokens/prompt in subagent vs. single-agent sessions, showing whether subagents are returning more useful work
+- **Context pressure vs. correction rate** — flags sessions that hit > 80k tokens and shows whether they had a higher correction rate than shorter sessions
 
 ## Data source
 

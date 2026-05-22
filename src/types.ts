@@ -65,6 +65,7 @@ export interface SessionStats {
   model: string;
   outputRatio: number | null; // write+edit share; null if < MIN_TOOL_CALLS
   medianVagueScore: number | null;   // null when session has no user prompts
+  hasSubagents: boolean;
 }
 
 export interface DailyUsage {
@@ -116,6 +117,29 @@ export interface AnalysisResult {
     nTotal: number;
   };
   medianOutputRatio: number | null; // overall median across all scored sessions
+  // compaction signals
+  compactionEventCount: number;
+  autoCompactionCount: number;
+  manualCompactionCount: number;
+  // harness correlations
+  subagentCorrelation: SubagentCorrelation | null;
+  contextPressureCorrelation: ContextPressureCorrelation | null;
+}
+
+// ── Harness correlations ──────────────────────────────────────
+
+export interface SubagentCorrelation {
+  subagentOutputRatio: number | null;    // median outputRatio for sessions that spawned subagents; null if < 2
+  singleAgentOutputRatio: number | null; // median outputRatio for sessions without subagents; null if < 2
+  subagentSessions: number;
+  singleAgentSessions: number;
+}
+
+export interface ContextPressureCorrelation {
+  pressureSessions: number;              // sessions with totalInputTokens > 80k
+  normalSessions: number;
+  pressureCorrectionRate: number | null; // null if < 2 pressure sessions
+  normalCorrectionRate: number | null;   // null if < 2 normal sessions
 }
 
 // ── Period-over-period delta ───────────────────────────────────
