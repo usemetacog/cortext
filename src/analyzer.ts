@@ -257,6 +257,9 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
   const allToolCalls: string[] = [];
   const firstMessageWordCounts: number[] = [];
   const slashCommandMap = new Map<string, number>();
+  let compactionEventCount = 0;
+  let autoCompactionCount = 0;
+  let manualCompactionCount = 0;
 
   for (const project of projects) {
     const sessionEntries = new Map<string, RawEntry[]>();
@@ -354,6 +357,13 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
               slashCommandMap.set(cmd, (slashCommandMap.get(cmd) ?? 0) + 1);
             }
           }
+        }
+
+        if (entry.type === 'system' && (entry as any).subtype === 'compact_boundary') {
+          compactionEventCount++;
+          const trigger = (entry as any).compactMetadata?.trigger;
+          if (trigger === 'auto') autoCompactionCount++;
+          else if (trigger === 'manual') manualCompactionCount++;
         }
       }
 
@@ -625,5 +635,8 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     verificationRate,
     outputRatioByBucket,
     medianOutputRatio,
+    compactionEventCount,
+    autoCompactionCount,
+    manualCompactionCount,
   };
 }

@@ -116,6 +116,10 @@ export interface AnalysisResult {
     nTotal: number;
   };
   medianOutputRatio: number | null; // overall median across all scored sessions
+  // compaction signals
+  compactionEventCount: number;
+  autoCompactionCount: number;
+  manualCompactionCount: number;
 }
 
 // ── Period-over-period delta ───────────────────────────────────
