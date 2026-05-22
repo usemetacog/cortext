@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { classifyPrompt, vagueScore, computeCost, analyze, hasVerificationCriteria } from '../analyzer';
 import type { ProjectData } from '../reader';
 
@@ -275,6 +278,7 @@ describe('analyze', () => {
   it('counts sessions and prompts correctly', () => {
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         makeEntry('user', 's1', 'fix the login bug in auth.ts so it stops throwing 401'),
         makeEntry('assistant', 's1', ''),
@@ -290,6 +294,7 @@ describe('analyze', () => {
   it('sums token usage from assistant entries', () => {
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         makeEntry('user', 's1', 'explain the retry logic'),
         makeEntry('assistant', 's1', '', { input_tokens: 1000, output_tokens: 500 }),
@@ -303,6 +308,7 @@ describe('analyze', () => {
   it('computes verificationRate only over implement+fix prompts', () => {
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         // implement with verification → counts
         makeEntry('user', 's1', 'add OAuth to src/auth.ts and run the tests'),
@@ -326,6 +332,7 @@ describe('analyze', () => {
   it('detects correction turns', () => {
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         makeEntry('user', 's1', 'update the config file'),
         makeEntry('assistant', 's1', ''),
@@ -342,6 +349,7 @@ describe('analyze', () => {
   it('includes high-vague-score prompts in worstPrompts', () => {
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         makeEntry('user', 's1', 'fix it'),
         makeEntry('assistant', 's1', ''),
@@ -355,6 +363,7 @@ describe('analyze', () => {
   it('builds slashCommands map with per-command counts', () => {
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         makeEntry('user', 's1', '/clear'),
         makeEntry('assistant', 's1', ''),
@@ -377,6 +386,7 @@ describe('analyze', () => {
   it('aggregates stats across multiple projects', () => {
     const p1: ProjectData = {
       name: 'project-a',
+      dir: '',
       entries: [
         makeEntry('user', 's1', 'add login feature to src/auth.ts module here'),
         makeEntry('assistant', 's1', '', { input_tokens: 500, output_tokens: 200 }),
@@ -384,6 +394,7 @@ describe('analyze', () => {
     };
     const p2: ProjectData = {
       name: 'project-b',
+      dir: '',
       entries: [
         makeEntry('user', 's2', 'fix the crash in the payment service module'),
         makeEntry('assistant', 's2', '', { input_tokens: 300, output_tokens: 100 }),
@@ -402,6 +413,7 @@ describe('output ratio metrics', () => {
   it('medianOutputRatio is null when no session reaches MIN_TOOL_CALLS', () => {
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         makeEntry('user', 's1', 'fix the auth bug in src/auth.ts'),
         makeAssistantWithTools('s1', ['Read', 'Bash', 'Bash']), // 3 calls < 5
@@ -418,6 +430,7 @@ describe('output ratio metrics', () => {
     const t = (offset: number) => new Date(Date.now() + offset * 1000).toISOString();
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         // Two sessions with 2/5 = 0.4 productive ratio each → overall median 0.4
         makeEntry('user', 's1', 'add `getUserById` to src/users.ts — should return null instead of throwing', undefined, t(0)),
@@ -433,6 +446,7 @@ describe('output ratio metrics', () => {
   it('outputRatioByBucket is null when a bucket has fewer than 2 sessions', () => {
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         makeEntry('user', 's1', 'add `getUserById` to src/users.ts — should return null instead of throwing'),
         makeAssistantWithTools('s1', ['Read', 'Read', 'Edit', 'Write', 'Bash']),
@@ -447,6 +461,7 @@ describe('output ratio metrics', () => {
     const t = (offset: number) => new Date(Date.now() + offset * 1000).toISOString();
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         // Specific session 1: detailed prompt (vagueScore < 3), productive tools
         makeEntry('user', 's1', 'add `getUserById` to src/users.ts — should return null instead of throwing', undefined, t(0)),
@@ -475,6 +490,7 @@ describe('output ratio metrics', () => {
   it('medianVagueScore excludes sessions with no user prompts from bucket aggregation', () => {
     const project: ProjectData = {
       name: 'test',
+      dir: '',
       entries: [
         // Session with no user message — should not appear in scoredSessions
         makeAssistantWithTools('s1', ['Write', 'Write', 'Write', 'Write', 'Write']),
@@ -483,5 +499,160 @@ describe('output ratio metrics', () => {
     const result = analyze([project], 30);
     expect(result.medianOutputRatio).toBeNull();
     expect(result.outputRatioByBucket.nTotal).toBe(0);
+  });
+});
+
+// ── contextPressureCorrelation ────────────────────────────────
+
+describe('contextPressureCorrelation', () => {
+  it('returns null when no sessions exceed 80k input tokens', () => {
+    const project: ProjectData = {
+      name: 'test',
+      dir: '',
+      entries: [
+        makeEntry('user', 's1', 'fix the auth bug in src/auth.ts'),
+        makeEntry('assistant', 's1', '', { input_tokens: 1_000, output_tokens: 50 }),
+      ],
+    };
+    const result = analyze([project], 30);
+    expect(result.contextPressureCorrelation).toBeNull();
+  });
+
+  it('detects pressure sessions and computes correction rates', () => {
+    const t = (offset: number) => new Date(Date.now() + offset * 1000).toISOString();
+    const project: ProjectData = {
+      name: 'test',
+      dir: '',
+      entries: [
+        // Pressure session with a correction turn
+        makeEntry('user', 's1', 'implement this feature in src/api.ts', undefined, t(0)),
+        makeEntry('assistant', 's1', '', { input_tokens: 90_000, output_tokens: 50 }, t(1)),
+        makeEntry('user', 's1', 'no wait, I meant the other approach', undefined, t(2)),
+        makeEntry('assistant', 's1', '', { input_tokens: 1_000, output_tokens: 50 }, t(3)),
+        // Pressure session without correction
+        makeEntry('user', 's2', 'add OAuth to src/auth.ts', undefined, t(4)),
+        makeEntry('assistant', 's2', '', { input_tokens: 85_000, output_tokens: 50 }, t(5)),
+        // Normal sessions without correction
+        makeEntry('user', 's3', 'explain the cache invalidation pattern', undefined, t(6)),
+        makeEntry('assistant', 's3', '', { input_tokens: 1_000, output_tokens: 50 }, t(7)),
+        makeEntry('user', 's4', 'explain the retry logic in src/client.ts', undefined, t(8)),
+        makeEntry('assistant', 's4', '', { input_tokens: 2_000, output_tokens: 50 }, t(9)),
+      ],
+    };
+    const result = analyze([project], 30);
+    expect(result.contextPressureCorrelation).not.toBeNull();
+    const cp = result.contextPressureCorrelation!;
+    // s1 totalInputTokens = 90_000 + 1_000 = 91_000 > 80k; s2 = 85_000 > 80k
+    expect(cp.pressureSessions).toBe(2);
+    expect(cp.normalSessions).toBe(2);
+    // 1 of 2 pressure sessions had a correction → 0.5
+    expect(cp.pressureCorrectionRate).toBeCloseTo(0.5);
+    // 0 of 2 normal sessions had corrections → 0
+    expect(cp.normalCorrectionRate).toBeCloseTo(0);
+  });
+
+  it('pressureCorrectionRate is null when only one pressure session exists', () => {
+    const project: ProjectData = {
+      name: 'test',
+      dir: '',
+      entries: [
+        makeEntry('user', 's1', 'add feature to src/api.ts'),
+        makeEntry('assistant', 's1', '', { input_tokens: 90_000, output_tokens: 50 }),
+      ],
+    };
+    const result = analyze([project], 30);
+    // pressureSessions = 1, so contextPressureCorrelation is non-null (pressureSessions >= 1)
+    // but pressureCorrectionRate is null (requires >= 2 pressure sessions)
+    expect(result.contextPressureCorrelation).not.toBeNull();
+    expect(result.contextPressureCorrelation!.pressureCorrectionRate).toBeNull();
+  });
+});
+
+// ── subagentCorrelation ───────────────────────────────────────
+
+describe('subagentCorrelation', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'cortext-subagent-correlation-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns null when fewer than 3 sessions have outputRatio data', () => {
+    const project: ProjectData = {
+      name: 'test',
+      dir: '',
+      entries: [
+        makeEntry('user', 's1', 'fix the bug in src/auth.ts'),
+        makeAssistantWithTools('s1', ['Read', 'Write', 'Write', 'Write', 'Write']),
+        makeEntry('user', 's2', 'add a feature to src/api.ts'),
+        makeAssistantWithTools('s2', ['Read', 'Edit', 'Write', 'Bash', 'Write']),
+      ],
+    };
+    const result = analyze([project], 30);
+    // Only 2 sessions with outputRatio — below the MIN_CORRELATION_SESSIONS threshold of 3
+    expect(result.subagentCorrelation).toBeNull();
+  });
+
+  it('is non-null with 3+ scored sessions and provides singleAgentOutputRatio', () => {
+    const t = (offset: number) => new Date(Date.now() + offset * 1000).toISOString();
+    const project: ProjectData = {
+      name: 'test',
+      dir: '',
+      entries: [
+        makeEntry('user', 's1', 'fix auth bug in src/auth.ts', undefined, t(0)),
+        makeAssistantWithTools('s1', ['Read', 'Bash', 'Bash', 'Bash', 'Read'], t(1)),
+        makeEntry('user', 's2', 'explain the retry logic in src/client.ts', undefined, t(2)),
+        makeAssistantWithTools('s2', ['Read', 'Bash', 'Bash', 'Read', 'Bash'], t(3)),
+        makeEntry('user', 's3', 'add OAuth to src/auth.ts', undefined, t(4)),
+        makeAssistantWithTools('s3', ['Read', 'Read', 'Bash', 'Bash', 'Bash'], t(5)),
+      ],
+    };
+    const result = analyze([project], 30);
+    expect(result.subagentCorrelation).not.toBeNull();
+    // No subagent dirs → all sessions are single-agent
+    expect(result.subagentCorrelation!.subagentSessions).toBe(0);
+    expect(result.subagentCorrelation!.singleAgentSessions).toBe(3);
+    expect(result.subagentCorrelation!.subagentOutputRatio).toBeNull(); // no subagent sessions
+    expect(result.subagentCorrelation!.singleAgentOutputRatio).not.toBeNull();
+  });
+
+  it('tags sessions with subagent dirs and computes subagentOutputRatio', () => {
+    const s1 = 's-sub1';
+    const s2 = 's-sub2';
+    const s3 = 's-normal';
+    mkdirSync(join(tmpDir, s1, 'subagents'), { recursive: true });
+    writeFileSync(join(tmpDir, s1, 'subagents', 'agent-1.jsonl'), '');
+    mkdirSync(join(tmpDir, s2, 'subagents'), { recursive: true });
+    writeFileSync(join(tmpDir, s2, 'subagents', 'agent-1.jsonl'), '');
+
+    const t = (offset: number) => new Date(Date.now() + offset * 1000).toISOString();
+    const project: ProjectData = {
+      name: 'test',
+      dir: tmpDir,
+      entries: [
+        // Subagent session 1: 4/5 productive = 0.8
+        makeEntry('user', s1, 'implement OAuth in src/auth.ts', undefined, t(0)),
+        makeAssistantWithTools(s1, ['Read', 'Write', 'Write', 'Write', 'Write'], t(1)),
+        // Subagent session 2: 3/5 productive = 0.6 → median([0.8, 0.6]) = 0.8
+        makeEntry('user', s2, 'add feature to src/api.ts', undefined, t(2)),
+        makeAssistantWithTools(s2, ['Read', 'Write', 'Write', 'Edit', 'Bash'], t(3)),
+        // Normal session: 0/5 productive = 0.0
+        makeEntry('user', s3, 'explain the retry logic in src/client.ts', undefined, t(4)),
+        makeAssistantWithTools(s3, ['Read', 'Bash', 'Bash', 'Read', 'Bash'], t(5)),
+      ],
+    };
+    const result = analyze([project], 30);
+    expect(result.subagentCorrelation).not.toBeNull();
+    const sc = result.subagentCorrelation!;
+    expect(sc.subagentSessions).toBe(2);
+    expect(sc.singleAgentSessions).toBe(1);
+    // median([0.8, 0.6]) → sorted [0.6, 0.8], index 1 = 0.8
+    expect(sc.subagentOutputRatio).toBeCloseTo(0.8);
+    // median([0.0]) → null (requires >= 2 elements)
+    expect(sc.singleAgentOutputRatio).toBeNull();
   });
 });

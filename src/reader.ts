@@ -9,7 +9,17 @@ const PROJECTS_DIR =
 
 export interface ProjectData {
   name: string;
+  dir: string;  // full path to this project's directory in ~/.claude/projects/
   entries: RawEntry[];
+}
+
+export function hasSubagentDir(projectDir: string, sessionId: string): boolean {
+  const subagentDir = join(projectDir, sessionId, 'subagents');
+  try {
+    return statSync(subagentDir).isDirectory() && readdirSync(subagentDir).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 export function readProjects(days: number, offsetDays = 0): ProjectData[] {
@@ -86,7 +96,7 @@ export function readProjects(days: number, offsetDays = 0): ProjectData[] {
       projectName = dirName.split("-").pop() ?? dirName;
     }
 
-    results.push({ name: projectName, entries });
+    results.push({ name: projectName, dir: projectDir, entries });
   }
 
   return results;

@@ -1,12 +1,14 @@
 import type { ProjectData } from './reader';
-import { extractUserText } from './reader';
+import { extractUserText, hasSubagentDir } from './reader';
 import type {
   AnalysisResult,
+  ContextPressureCorrelation,
   DailyUsage,
   ProjectStats,
   PromptCategory,
   RawEntry,
   SessionStats,
+  SubagentCorrelation,
   UnreadMoment,
   Usage,
   UserPrompt,
@@ -293,6 +295,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
         model: 'claude-sonnet-4-6',
         outputRatio: null,
         medianVagueScore: null,
+        hasSubagents: false,
       };
 
       // Build ordered message sequence for correction detection
@@ -468,6 +471,8 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
           ? productiveToolCalls / totalSessionToolCalls
           : null;
 
+      sessionStat.hasSubagents = hasSubagentDir(project.dir, sessionId);
+
       const sortedVague = [...sessionPromptVagueScores].sort((a, b) => a - b);
       sessionStat.medianVagueScore =
         sortedVague.length > 0
@@ -610,6 +615,44 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     ? actionablePrompts.filter(p => p.hasVerification).length / actionablePrompts.length
     : 0;
 
+  // ── Harness correlations ─────────────────────────────────────
+
+  // Subagent ↔ output ratio: group scored sessions by whether they spawned subagents
+  const MIN_CORRELATION_SESSIONS = 3;
+  const subagentScored = Array.from(sessions.values()).filter(s => s.outputRatio !== null);
+  const withSubagents = subagentScored.filter(s => s.hasSubagents).map(s => s.outputRatio!);
+  const withoutSubagents = subagentScored.filter(s => !s.hasSubagents).map(s => s.outputRatio!);
+  const subagentCorrelation: SubagentCorrelation | null =
+    subagentScored.length >= MIN_CORRELATION_SESSIONS
+      ? {
+          subagentOutputRatio: median(withSubagents),
+          singleAgentOutputRatio: median(withoutSubagents),
+          subagentSessions: withSubagents.length,
+          singleAgentSessions: withoutSubagents.length,
+        }
+      : null;
+
+  // Context pressure ↔ correction rate: sessions exceeding 80k input tokens
+  const CONTEXT_PRESSURE_TOKENS = 80_000;
+  const allSessionsList = Array.from(sessions.values());
+  const pressureList = allSessionsList.filter(s => s.totalInputTokens > CONTEXT_PRESSURE_TOKENS);
+  const normalList = allSessionsList.filter(s => s.totalInputTokens <= CONTEXT_PRESSURE_TOKENS);
+  const pressureCorrectionRate = pressureList.length >= 2
+    ? pressureList.filter(s => s.correctionCount > 0).length / pressureList.length
+    : null;
+  const normalCorrectionRate = normalList.length >= 2
+    ? normalList.filter(s => s.correctionCount > 0).length / normalList.length
+    : null;
+  const contextPressureCorrelation: ContextPressureCorrelation | null =
+    pressureList.length >= 1
+      ? {
+          pressureSessions: pressureList.length,
+          normalSessions: normalList.length,
+          pressureCorrectionRate,
+          normalCorrectionRate,
+        }
+      : null;
+
   return {
     totalSessions: sessions.size,
     totalPrompts: allPrompts.length,
@@ -638,5 +681,7 @@ export function analyze(projects: ProjectData[], days: number): AnalysisResult {
     compactionEventCount,
     autoCompactionCount,
     manualCompactionCount,
+    subagentCorrelation,
+    contextPressureCorrelation,
   };
 }
