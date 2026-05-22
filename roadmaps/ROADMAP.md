@@ -6,6 +6,11 @@ Gaps identified before the tool is genuinely useful to heavy Claude Code users.
 
 ## Open
 
+### 6. No harness health visibility — prompt quality without environment quality is half the picture
+cortext measures how you prompt but not whether your harness is set up to let you do your best work. CLAUDE.md structure, hooks, subagent usage, compaction patterns, and permission configuration all shape what Claude can do before a prompt fires. A high vagueness score looks different if your CLAUDE.md is 2000 words of noise. The two layers belong together.
+
+Planned: `ConfigAudit` (reads `~/.claude/settings.json`, `CLAUDE.md`, `.claudeignore`) + `BehavioralProfile` (subagent sessions, compaction events from JSONL) → `HarnessScore` with `overall = 0.6×config + 0.4×behavioral`. New HARNESS HEALTH TUI panel. Source of truth: Anthropic harness design docs. Design: `~/.gstack/projects/usemetacog-cortext/nathanchiu-nate-harness-design-20260522-102745.md`
+
 ### 2. No trend data — can't see improvement over time
 The tool gives a snapshot, not a trajectory. There's no comparison to a prior period (e.g. "vague prompt rate: 28% → 19%"). The coaching review has a 7-day cooldown but no diff against the previous report. Behavior change requires visible movement.
 
