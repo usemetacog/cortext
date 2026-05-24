@@ -65,7 +65,9 @@ function ask(rl: readline.Interface, prompt: string): Promise<string> {
 export async function runInteractive(result: AnalysisResult): Promise<void> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.error('\nANTHROPIC_API_KEY not set. Export it to use --interactive.\n');
+    console.error(chalk.yellow('\n--interactive calls the Anthropic API (separate from Claude Pro/Max subscriptions).'));
+    console.error(chalk.dim('Get a free key at: https://console.anthropic.com'));
+    console.error(chalk.dim('Then: export ANTHROPIC_API_KEY=sk-ant-...\n'));
     process.exit(1);
   }
 

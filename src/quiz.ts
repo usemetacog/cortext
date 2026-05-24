@@ -126,7 +126,9 @@ function getRepo(): string | undefined {
 export async function runQuiz(staged: boolean): Promise<boolean> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.error(chalk.red('\nANTHROPIC_API_KEY is required for the diff quiz.\n'));
+    console.error(chalk.yellow('\nThe diff quiz calls the Anthropic API (separate from Claude Pro/Max subscriptions).'));
+    console.error(chalk.dim('Get a free key at: https://console.anthropic.com'));
+    console.error(chalk.dim('Then: export ANTHROPIC_API_KEY=sk-ant-...\n'));
     return false;
   }
 

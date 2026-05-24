@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { AnalysisResult, Goal, CoachReport } from './types';
+import type { AnalysisResult, Goal, CoachReport, UserPrompt } from './types';
+import { heuristicDiagnosis, heuristicBetter } from './rewriter';
 
 function pct(n: number): string {
   return (n * 100).toFixed(0) + '%';
@@ -97,16 +98,186 @@ function buildUserMessage(result: AnalysisResult): string {
   return lines.join('\n');
 }
 
+// ── Heuristic coach (no API key required) ──────────────────────
+
+function scoreHigh(rate: number): number {
+  if (rate >= 0.7) return 9;
+  if (rate >= 0.5) return 7;
+  if (rate >= 0.3) return 5;
+  if (rate >= 0.1) return 3;
+  return 2;
+}
+
+function scoreLow(rate: number): number {
+  if (rate <= 0.05) return 9;
+  if (rate <= 0.15) return 7;
+  if (rate <= 0.25) return 5;
+  if (rate <= 0.4) return 3;
+  return 2;
+}
+
+function scoreWords(words: number): number {
+  if (words >= 40) return 9;
+  if (words >= 25) return 7;
+  if (words >= 15) return 5;
+  if (words >= 8) return 4;
+  return 2;
+}
+
+function toGrade(avg: number): string {
+  if (avg >= 8.5) return 'A';
+  if (avg >= 7.5) return 'A-';
+  if (avg >= 7.0) return 'B+';
+  if (avg >= 6.5) return 'B';
+  if (avg >= 6.0) return 'B-';
+  if (avg >= 5.5) return 'C+';
+  if (avg >= 5.0) return 'C';
+  if (avg >= 4.5) return 'C-';
+  if (avg >= 4.0) return 'D+';
+  if (avg >= 3.5) return 'D';
+  return 'F';
+}
+
+export function runHeuristicCoach(result: AnalysisResult, goal: Goal): CoachReport {
+  const vagueRate = result.totalPrompts > 0
+    ? result.promptCategories.vague / result.totalPrompts
+    : 0;
+  const clearRate = result.totalSessions > 0
+    ? (result.slashCommands['/clear'] ?? 0) / result.totalSessions
+    : 0;
+
+  const specificityScore = scoreWords(result.avgPromptWords);
+  const ownershipScore   = scoreLow(result.correctionRate);
+  const toolScore        = (() => {
+    const t = result.toolDiversity;
+    if (t >= 8) return 9; if (t >= 5) return 7; if (t >= 3) return 5; if (t >= 1) return 3; return 1;
+  })();
+  const frontloadingScore    = scoreWords(result.medianFirstMessageWords);
+  const efficiencyScore      = scoreLow((vagueRate + result.correctionRate) / 2);
+  const ctxMgmtScore         = (() => {
+    if (clearRate >= 0.4) return 9; if (clearRate >= 0.2) return 7;
+    if (clearRate >= 0.1) return 5; if (clearRate >= 0.05) return 4; return 3;
+  })();
+  const verificationScore    = scoreHigh(result.verificationRate);
+
+  const avg = (specificityScore + ownershipScore + toolScore + frontloadingScore +
+               efficiencyScore + ctxMgmtScore + verificationScore) / 7;
+  const grade = toGrade(avg);
+
+  // Notes per signal
+  const specificityNote =
+    result.avgPromptWords < 10
+      ? `Median prompt is ${result.avgPromptWords} words — too short to act on without guessing.`
+      : result.avgPromptWords < 20
+      ? `${result.avgPromptWords}-word median is workable but lean; add file paths and expected behaviors.`
+      : `${result.avgPromptWords}-word median shows reasonable specificity.`;
+
+  const ownershipNote =
+    result.correctionRate > 0.3
+      ? `${pct(result.correctionRate)} of sessions had correction turns — prompts are leaving too much to infer.`
+      : result.correctionRate > 0.15
+      ? `${pct(result.correctionRate)} correction rate is acceptable; room to improve.`
+      : `${pct(result.correctionRate)} correction rate is solid — prompts are landing well.`;
+
+  const toolNote =
+    result.toolDiversity <= 2
+      ? `Only ${result.toolDiversity} distinct tool namespace${result.toolDiversity === 1 ? '' : 's'} used — explore subagents, web search, and custom tools.`
+      : result.toolDiversity <= 5
+      ? `${result.toolDiversity} tools is a decent start; look for more opportunities to leverage Claude's capabilities.`
+      : `${result.toolDiversity} tool namespaces shows good breadth.`;
+
+  const frontloadNote =
+    result.medianFirstMessageWords < 10
+      ? `Median first message is ${result.medianFirstMessageWords} words — sessions start cold with no context.`
+      : result.medianFirstMessageWords < 25
+      ? `${result.medianFirstMessageWords}-word opening messages leave Claude with limited context upfront.`
+      : `${result.medianFirstMessageWords}-word first messages are front-loading context well.`;
+
+  const efficiencyNote =
+    vagueRate > 0.3
+      ? `${pct(vagueRate)} vague prompt rate is high — every prompt should state what file, what's wrong, and what success looks like.`
+      : vagueRate > 0.15
+      ? `${pct(vagueRate)} of prompts flagged as vague; watch for under-specified requests.`
+      : `Low vague rate — prompts are generally actionable.`;
+
+  const ctxNote =
+    clearRate < 0.05
+      ? `/clear used rarely (${result.slashCommands['/clear'] ?? 0}× in ${result.totalSessions} sessions) — context is likely bleeding between unrelated tasks.`
+      : clearRate < 0.2
+      ? `/clear used ${result.slashCommands['/clear'] ?? 0}× — consider using it more between unrelated tasks.`
+      : `/clear used regularly — good habit of keeping context clean.`;
+
+  const verifyNote =
+    result.verificationRate < 0.1
+      ? `Verification criteria in only ${pct(result.verificationRate)} of implement/fix prompts — adding "run tests after" or "verify that X" is the single highest-leverage habit.`
+      : result.verificationRate < 0.3
+      ? `${pct(result.verificationRate)} of actionable prompts include verify criteria — aim for 50%+.`
+      : `${pct(result.verificationRate)} of actionable prompts include verification — above average.`;
+
+  // Worst moments via heuristics
+  const worstMoments = result.worstPrompts.slice(0, 3).map((p: UserPrompt) => ({
+    original:  p.text,
+    diagnosis: heuristicDiagnosis(p),
+    better:    heuristicBetter(p),
+  }));
+
+  // Strengths & gaps
+  const scores = { specificityScore, ownershipScore, toolScore, frontloadingScore, verificationScore, ctxMgmtScore };
+  const strengthNames = [
+    [scores.specificityScore,  'prompt specificity'],
+    [scores.ownershipScore,    'low correction rate'],
+    [scores.toolScore,         'tool diversity'],
+    [scores.frontloadingScore, 'front-loading context'],
+    [scores.verificationScore, 'verification habits'],
+  ] as [number, string][];
+
+  const goodStrengths = strengthNames.filter(([s]) => s >= 7).map(([, n]) => n);
+  const weaknesses    = strengthNames.filter(([s]) => s <= 4).map(([, n]) => n);
+
+  const whatIsWorking = goodStrengths.length > 0
+    ? `Your ${goodStrengths.slice(0, 2).join(' and ')} ${goodStrengths.length === 1 ? 'is' : 'are'} solid. Keep it.`
+    : 'The fundamentals are there — consistency across sessions is the next challenge.';
+
+  const primaryGap = weaknesses[0] ?? 'verification habits';
+  const gapSentence: Record<string, string> = {
+    'prompt specificity':        'You\'re leaving too much for Claude to infer. Every prompt needs: what file to touch, what\'s broken or expected, and what success looks like.',
+    'front-loading context':     'You\'re starting sessions without enough context. Open each session with the full picture so Claude can work autonomously without constant steering.',
+    'verification habits':       'Every implement/fix prompt should end with how you\'ll verify the result — "run tests after", "check that X". This is the single habit that compounds fastest.',
+    'low correction rate':       'Your prompts are generating enough corrections that you\'re spending more time redirecting than building. Be more specific upfront.',
+    'tool diversity':            'You\'re not using the full range of tools available. Explore subagents, web search, and file operations to get more done per session.',
+  };
+
+  const honestGap = `Your biggest lever is ${primaryGap}. ${gapSentence[primaryGap] ?? `Work on ${primaryGap} — it\'s the gap between your current patterns and the ${goal.label} persona.`} Run \`npx cortext review\` again after a week to see if the numbers move.`;
+
+  const gradeReason = avg >= 7
+    ? `Solid fundamentals — ${weaknesses.length > 0 ? `focus on ${weaknesses[0]} to push higher` : 'keep it consistent'}.`
+    : avg >= 5
+    ? `Middle of the pack — clear levers to pull, starting with ${weaknesses[0] ?? 'specificity'}.`
+    : `Below average across the board — ${weaknesses[0] ?? 'specificity'} is the most urgent fix.`;
+
+  return {
+    grade,
+    gradeReason,
+    signalScores: {
+      specificity:       { score: specificityScore,   note: specificityNote },
+      ownership:         { score: ownershipScore,     note: ownershipNote },
+      toolDiversity:     { score: toolScore,          note: toolNote },
+      frontloading:      { score: frontloadingScore,  note: frontloadNote },
+      efficiency:        { score: efficiencyScore,    note: efficiencyNote },
+      contextManagement: { score: ctxMgmtScore,       note: ctxNote },
+      verificationHabit: { score: verificationScore,  note: verifyNote },
+    },
+    worstMoments,
+    whatIsWorking,
+    honestGap,
+  };
+}
+
 export async function runCoach(result: AnalysisResult, goal: Goal): Promise<CoachReport | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.error('\nThis feature calls the Anthropic API — separate from your Claude Code subscription.');
-    console.error('\nGet a free key at: https://console.anthropic.com  (free tier covers review usage)');
-    console.error('\nThen run:');
-    console.error('  export ANTHROPIC_API_KEY=sk-ant-...');
-    console.error('  npx cortext review');
-    console.error('\nTo make it permanent: add the export line to your ~/.zshrc or ~/.bashrc\n');
-    process.exit(1);
+    // Fall back to heuristic report — no API call required
+    return runHeuristicCoach(result, goal);
   }
 
   const client = new Anthropic({ apiKey });

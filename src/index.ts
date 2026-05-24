@@ -51,6 +51,7 @@ Usage: npx cortext [command] [options]
 Commands:
   goal              Set a coaching goal (interactive wizard)
   review            Run a coaching critique against your active goal
+                    Works without an API key (heuristic mode); add ANTHROPIC_API_KEY for AI coaching
   quiz              Quiz yourself on your current git diff (needs ANTHROPIC_API_KEY)
 
 Options:
@@ -58,9 +59,12 @@ Options:
   --force           Regenerate review even if one was run in the last 7 days
   --staged          Quiz on staged changes only (default: all uncommitted changes)
   --web             Open browser dashboard
-  --analyze         AI-powered prompt improvement (needs ANTHROPIC_API_KEY)
+  --analyze         Prompt improvement suggestions (heuristic without key; AI with ANTHROPIC_API_KEY)
   --interactive     Chat with Claude about your stats (needs ANTHROPIC_API_KEY)
   --help            Show this help
+
+Note: ANTHROPIC_API_KEY is a separate Anthropic API key, not your Claude Pro/Max subscription.
+      Get one free at: https://console.anthropic.com
 
 Examples:
   npx cortext
@@ -203,7 +207,10 @@ async function runReview(days: number, force: boolean): Promise<void> {
     console.log(chalk.dim('Running your first review…\n'));
   }
 
-  if (!force && isInCooldown()) {
+  const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+
+  // Only enforce cooldown for AI reviews (no cost to run heuristic reviews)
+  if (hasApiKey && !force && isInCooldown()) {
     const age = daysSinceLastReview()!;
     const daysLeft = COOLDOWN_DAYS - age;
     const latest = loadLatestReview()!;
@@ -229,8 +236,16 @@ async function runReview(days: number, force: boolean): Promise<void> {
   const result = analyze(projects, days);
   const report = await runCoach(result, goal);
   if (report) {
-    saveReview(report, goal, days);
+    // Only persist AI-generated reviews (they enforce the cooldown; heuristic reviews are free)
+    if (hasApiKey) saveReview(report, goal, days);
     renderCoachReport(report, goal, days);
+    if (!hasApiKey) {
+      console.log('');
+      console.log(chalk.dim('  Heuristic report — scored from your stats, no API call made.'));
+      console.log(chalk.dim('  For AI-powered coaching, add an Anthropic API key (separate from Claude Pro/Max):'));
+      console.log(chalk.dim('  https://console.anthropic.com → export ANTHROPIC_API_KEY=sk-ant-...'));
+      console.log('');
+    }
   }
 }
 

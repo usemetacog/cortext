@@ -68,6 +68,35 @@ export function heuristicDiagnosis(prompt: UserPrompt): string {
     : 'Several issues: ' + fixes.join('; ') + '.';
 }
 
+export function heuristicBetter(prompt: UserPrompt): string {
+  const text = prompt.text;
+  const needsFile = !/[\/\.][a-z]/i.test(text);
+  const needsOutcome = !/should|expected|want|need|instead|make it|so that/.test(text);
+  const needsVerify = !prompt.hasVerification;
+
+  const parts: string[] = [];
+
+  if (needsFile) {
+    parts.push(`In [path/to/file.ts], ${text.length > 40 ? text.slice(0, 40) + '...' : text}`);
+  } else {
+    parts.push(text.slice(0, 80) + (text.length > 80 ? '...' : ''));
+  }
+
+  if (needsOutcome) {
+    parts.push('Expected: [what success looks like — the specific behavior or output you want].');
+  }
+
+  if (needsVerify) {
+    parts.push('Verify by running [tests / checking that X works as expected].');
+  }
+
+  if (parts.length === 1 && !needsFile && !needsOutcome && !needsVerify) {
+    return '[Prompt structure is reasonable — focus on adding explicit verification criteria]';
+  }
+
+  return parts.join(' ');
+}
+
 export async function generateRewrite(prompt: UserPrompt): Promise<RewriteResult | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;

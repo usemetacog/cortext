@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { UserPrompt } from './types';
 import { renderAnalysisHeader, renderAnalysisEntry, renderAnalysisFooter } from './renderer';
+import { heuristicDiagnosis, heuristicBetter } from './rewriter';
 
 const SYSTEM_PROMPT = `You are a prompt quality coach for Claude Code users.
 Your job is to analyze real prompts sent to Claude Code and explain what context is missing, then rewrite each prompt to be specific, actionable, and efficient.
@@ -18,10 +19,18 @@ interface PromptAnalysis {
 
 export async function analyzePrompts(prompts: UserPrompt[]): Promise<void> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
+
   if (!apiKey) {
-    console.error('\nThis feature calls the Anthropic API — separate from your Claude Code subscription.');
-    console.error('Get a free key at: https://console.anthropic.com  then: export ANTHROPIC_API_KEY=sk-ant-...\n');
-    process.exit(1);
+    // Heuristic fallback — no API call required
+    renderAnalysisHeader();
+    for (let i = 0; i < prompts.length; i++) {
+      const p = prompts[i];
+      renderAnalysisEntry(i + 1, p.text, heuristicDiagnosis(p), heuristicBetter(p));
+    }
+    renderAnalysisFooter();
+    console.log('  (Heuristic analysis — no API call made. Add ANTHROPIC_API_KEY for AI-powered rewrites.)');
+    console.log('  https://console.anthropic.com\n');
+    return;
   }
 
   const client = new Anthropic({ apiKey });
