@@ -6,6 +6,7 @@ import * as os from 'os';
 import { execSync } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import chalk from 'chalk';
+import { createSpinner } from './spinner';
 
 const QUIZ_LOG_PATH = path.join(os.homedir(), '.cortext', 'quiz-log.jsonl');
 const MIN_CORRECT = 2;
@@ -146,12 +147,15 @@ export async function runQuiz(staged: boolean): Promise<boolean> {
   }
 
   const client = new Anthropic({ apiKey });
-  console.log(chalk.dim('\nGenerating quiz from your diff…\n'));
+  const quizSpinner = createSpinner('Generating quiz from your diff…');
+  quizSpinner.start();
 
   let questions: QuizQuestion[];
   try {
     questions = await generateQuestions(diff, client);
+    quizSpinner.stop();
   } catch {
+    quizSpinner.stop();
     console.error(chalk.red('Failed to generate questions. Check your API key and try again.'));
     return false;
   }

@@ -3,6 +3,7 @@ import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import chalk from 'chalk';
+import { createSpinner } from './spinner';
 import { readProjects, detectSubagentSessions } from './reader';
 import { analyze } from './analyzer';
 import { renderBehavior, renderMetrics, renderCoachReport, generateBehavioralAssumptions } from './renderer';
@@ -21,30 +22,6 @@ import { startWebServer } from './server';
 import { runQuiz } from './quiz';
 import type { Goal, GoalRubric, PeriodDelta } from './types';
 
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-function createSpinner(text: string) {
-  let frame = 0;
-  let timer: ReturnType<typeof setInterval> | null = null;
-  const isTTY = process.stdout.isTTY;
-
-  return {
-    start() {
-      if (!isTTY) return;
-      process.stdout.write('\x1B[?25l'); // hide cursor
-      timer = setInterval(() => {
-        process.stdout.write(`\r${chalk.cyan(SPINNER_FRAMES[frame % SPINNER_FRAMES.length])} ${chalk.dim(text)}`);
-        frame++;
-      }, 80);
-    },
-    stop() {
-      if (!isTTY) return;
-      if (timer) clearInterval(timer);
-      process.stdout.write('\r\x1B[K'); // clear line
-      process.stdout.write('\x1B[?25h'); // show cursor
-    },
-  };
-}
 
 const USAGE = `
 Usage: npx cortext [command] [options]
@@ -294,16 +271,20 @@ async function runReview(days: number, force: boolean): Promise<void> {
     return;
   }
 
-  console.log(chalk.dim(`\nRunning coaching report for "${goal.label}" over the last ${days} days…\n`));
+  const reviewSpinner = createSpinner('Running coaching report…');
+  reviewSpinner.start();
 
   const projects = readProjects(days);
   if (projects.length === 0) {
+    reviewSpinner.stop();
     console.error('\nNo Claude Code session data found in ~/.claude/projects/\n');
     process.exit(1);
   }
 
   const result = analyze(projects, days);
   const report = await runCoach(result, goal);
+  reviewSpinner.stop();
+
   if (report) {
     // Only persist AI-generated reviews (they enforce the cooldown; heuristic reviews are free)
     if (hasApiKey) saveReview(report, goal, days);
