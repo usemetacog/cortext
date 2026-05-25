@@ -21,6 +21,7 @@ import { logRewriteShown, checkAndLogOutcomes, loadOutcomeInsight } from './eval
 import { generateUnreadCallout } from './unread';
 import { startWebServer } from './server';
 import { runQuiz } from './quiz';
+import { installSkill } from './skill';
 import type { Goal, GoalRubric, PeriodDelta } from './types';
 
 
@@ -367,6 +368,9 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 async function main(): Promise<void> {
   const { command, days, analyze: shouldAnalyze, interactive: shouldInteract, force, help, web: shouldWeb, staged } = parseArgs(process.argv);
+
+  // Keep the Claude Code skill in sync with this version — silent, best-effort.
+  installSkill();
 
   console.log(chalk.dim(`cortext v${version}`));
 

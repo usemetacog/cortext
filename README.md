@@ -56,15 +56,19 @@ npx cortext
 
 **Option 2 — Claude Code skill:**
 
-If you use Claude Code, you can run cortext as a `/cortext` slash command directly in your session. Copy the skill file into your Claude skills directory:
+If you use Claude Code, you can run cortext as a `/cortext` slash command directly in your session.
 
-```bash
-mkdir -p ~/.claude/skills/cortext
-curl -o ~/.claude/skills/cortext/SKILL.md \
-  https://raw.githubusercontent.com/usemetacog/cortext/main/skill/SKILL.md
-```
+The skill is **auto-installed and kept up to date** — just run `npx cortext` once from your terminal and the skill file is written to `~/.claude/skills/cortext/SKILL.md` automatically. Every subsequent `npx cortext` run updates it if the version has changed.
 
-Then type `/cortext` in any Claude Code conversation to get your usage report inline.
+Then type `/cortext` in any Claude Code conversation to get your analytics inline.
+
+> **Upgrading from an older install?** If you installed the skill manually before v0.12.3, your copy runs a Python script instead of the real CLI. Run `npx cortext` once from your terminal to get the current skill, then `/cortext` will work correctly going forward. Or re-run the curl one-liner below to update immediately:
+>
+> ```bash
+> mkdir -p ~/.claude/skills/cortext
+> curl -o ~/.claude/skills/cortext/SKILL.md \
+>   https://raw.githubusercontent.com/usemetacog/cortext/main/skill/SKILL.md
+> ```
 
 ## Usage
 
