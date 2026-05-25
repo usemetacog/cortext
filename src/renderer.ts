@@ -57,6 +57,62 @@ function sectionLabel(text: string): string {
   return line(chalk.bold.cyan(text));
 }
 
+const STOP_WORDS_RENDERER = new Set([
+  'the','a','an','is','are','was','were','it','in','on','at','to','for',
+  'of','and','or','but','with','this','that','you','i','my','your',
+  'how','why','when','where','can','do','did','does','have','has','had',
+  'be','been','will','would','should','could','make','use','run','get',
+  'set','need','want','also','just','like','from','they','their','which',
+  'into','more','some','than','then','these','those','there','here','not',
+]);
+
+function keyTermsRenderer(text: string): string[] {
+  return text.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 3 && !STOP_WORDS_RENDERER.has(w));
+}
+
+/**
+ * Find the sentence(s) in claudeText that best cover the user's follow-up terms.
+ * Returns a short snippet prefixed with a pointer, or null if nothing meaningful found.
+ */
+function findCoveredSnippet(claudeText: string, userFollowUp: string): string | null {
+  const terms = keyTermsRenderer(userFollowUp);
+  if (terms.length === 0) return null;
+
+  // Split into sentences (rough split on ". ", "! ", "? ", or newlines)
+  const sentences = claudeText
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 10);
+
+  if (sentences.length === 0) return null;
+
+  // Score each sentence by how many terms it contains
+  let bestScore = 0;
+  let bestSentence = '';
+  for (const sentence of sentences) {
+    const lower = sentence.toLowerCase();
+    const score = terms.filter(t => lower.includes(t)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestSentence = sentence;
+    }
+  }
+
+  // Require at least 1 matching term and a meaningful sentence
+  if (bestScore === 0 || bestSentence.length < 15) return null;
+
+  // Trim the snippet to fit the box
+  const MAX = 160;
+  const snippet = bestSentence.length > MAX
+    ? bestSentence.slice(0, MAX).trimEnd() + '…'
+    : bestSentence;
+
+  return `↑ Covered here: "${snippet}"`;
+}
+
 function formatToken(n: number): string {
   if (!isFinite(n) || isNaN(n)) return '0';
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
@@ -376,14 +432,19 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
     }
   }
 
-  // "Did you read my response?" section
-  if (result.unreadMoments && result.unreadMoments.length > 0) {
+  // "Did you read my response?" section — only show entries with proof
+  const provableUnreadMoments = (result.unreadMoments ?? []).map(moment => ({
+    moment,
+    callout: moment.aiCallout ?? findCoveredSnippet(moment.claudeText, moment.userFollowUp),
+  })).filter(({ callout }) => callout !== null);
+
+  if (provableUnreadMoments.length > 0) {
     lines.push(divider());
     lines.push(sectionLabel('DID YOU READ MY RESPONSE?'));
     lines.push(blank());
 
-    for (let i = 0; i < result.unreadMoments.length; i++) {
-      const moment = result.unreadMoments[i];
+    for (let i = 0; i < provableUnreadMoments.length; i++) {
+      const { moment, callout } = provableUnreadMoments[i];
       if (i > 0) {
         lines.push(blank());
         lines.push(line(chalk.dim('·'.repeat(INNER))));
@@ -409,8 +470,7 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
       }
       lines.push(blank());
 
-      const callout = moment.aiCallout ?? 'This was already covered in my response above.';
-      for (const l of wrapText(callout, INNER - 4)) {
+      for (const l of wrapText(callout!, INNER - 4)) {
         lines.push(line('  ' + chalk.red(l)));
       }
     }

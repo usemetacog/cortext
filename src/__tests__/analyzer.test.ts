@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { classifyPrompt, vagueScore, computeCost, analyze, hasVerificationCriteria } from '../analyzer';
+import { classifyPrompt, vagueScore, computeCost, analyze, hasVerificationCriteria, isOperationalCommand } from '../analyzer';
 import type { ProjectData } from '../reader';
 
 // ── classifyPrompt ────────────────────────────────────────────────
@@ -83,12 +83,54 @@ describe('classifyPrompt', () => {
     expect(classifyPrompt('looks good')).toBe('other');
   });
 
+  it('classifies git/deployment operations as other, not vague', () => {
+    expect(classifyPrompt('commit this')).toBe('other');
+    expect(classifyPrompt('can we commit it?')).toBe('other');
+    expect(classifyPrompt('push it')).toBe('other');
+    expect(classifyPrompt('push to main')).toBe('other');
+    expect(classifyPrompt('can we push')).toBe('other');
+    expect(classifyPrompt('deploy this')).toBe('other');
+    expect(classifyPrompt('merge the branch')).toBe('other');
+  });
+
   it('classifies long messages by content, falling back to implement', () => {
     const longFix = 'fix ' + 'word '.repeat(200);
     expect(classifyPrompt(longFix)).toBe('fix');
 
     const longNoKeyword = 'word '.repeat(201);
     expect(classifyPrompt(longNoKeyword)).toBe('implement');
+  });
+});
+
+// ── isOperationalCommand ──────────────────────────────────────────
+
+describe('isOperationalCommand', () => {
+  it('identifies git commit and push commands', () => {
+    expect(isOperationalCommand('commit this')).toBe(true);
+    expect(isOperationalCommand('can we commit it?')).toBe(true);
+    expect(isOperationalCommand('push it')).toBe(true);
+    expect(isOperationalCommand('push to main')).toBe(true);
+    expect(isOperationalCommand('can we push?')).toBe(true);
+  });
+
+  it('identifies other git and deployment operations', () => {
+    expect(isOperationalCommand('merge the branch')).toBe(true);
+    expect(isOperationalCommand('deploy this')).toBe(true);
+    expect(isOperationalCommand('let us deploy')).toBe(true);
+    expect(isOperationalCommand('rebase on main')).toBe(true);
+    expect(isOperationalCommand('revert this')).toBe(true);
+  });
+
+  it('returns false for non-operational short vague prompts', () => {
+    expect(isOperationalCommand('do this')).toBe(false);
+    expect(isOperationalCommand('make it work')).toBe(false);
+    expect(isOperationalCommand('fix it')).toBe(false);
+    expect(isOperationalCommand('update the component')).toBe(false);
+  });
+
+  it('returns false for long messages even with git words', () => {
+    const long = 'please commit all of the many changes we have been making over the last several days';
+    expect(isOperationalCommand(long)).toBe(false); // >10 words
   });
 });
 
@@ -131,6 +173,17 @@ describe('vagueScore', () => {
 
   it('returns 0 for long messages', () => {
     expect(vagueScore('word '.repeat(201))).toBe(0);
+  });
+
+  it('returns 0 for git/deployment operations regardless of length or missing anchors', () => {
+    // These should never be flagged as vague — they are contextually complete commands
+    expect(vagueScore('commit this')).toBe(0);
+    expect(vagueScore('can we commit it?')).toBe(0);
+    expect(vagueScore('push it')).toBe(0);
+    expect(vagueScore('push to main')).toBe(0);
+    expect(vagueScore('deploy this')).toBe(0);
+    expect(vagueScore('merge the branch')).toBe(0);
+    expect(vagueScore('can we push?')).toBe(0);
   });
 
   it('returns 0 when prior assistant turn asked a question', () => {

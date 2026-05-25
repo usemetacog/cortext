@@ -72,6 +72,29 @@ describe('heuristicDiagnosis', () => {
     expect(result).toContain('led directly to a correction turn');
   });
 
+  it('does not flag structural issues for git/deployment operations', () => {
+    // "commit this" has no file path, code ref, or expected outcome — but it's a git op
+    const commitDiag = heuristicDiagnosis(makePrompt({ text: 'commit this', wordCount: 2 }));
+    expect(commitDiag).not.toContain('no file path');
+    expect(commitDiag).not.toContain('no code reference');
+    expect(commitDiag).not.toContain('no expected outcome');
+    expect(commitDiag).not.toContain('too short to be actionable');
+
+    const pushDiag = heuristicDiagnosis(makePrompt({ text: 'can we commit it?', wordCount: 4 }));
+    expect(pushDiag).not.toContain('no file path');
+    expect(pushDiag).not.toContain('no code reference');
+  });
+
+  it('produces a correction-specific diagnosis for git ops that caused corrections', () => {
+    const result = heuristicDiagnosis(makePrompt({
+      text: 'commit this',
+      wordCount: 2,
+      followedByCorrection: true,
+    }));
+    expect(result).toContain('correction');
+    expect(result).not.toContain('no file path');
+  });
+
   it('returns fallback message when no issues found', () => {
     const text = 'fix `handleLogin` in src/auth.ts — it should redirect to /dashboard but returns 401';
     const result = heuristicDiagnosis(makePrompt({

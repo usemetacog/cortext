@@ -85,6 +85,19 @@ function isCommandLike(word: string): boolean {
   return false;
 }
 
+// Git and deployment operations are self-contained — "commit this", "push it",
+// "can we deploy?" operate on current repo state and don't need file paths,
+// code references, or expected outcomes to be actionable. Flagging them as
+// vague generates misleading advice ("add a file path to your git commit").
+const GIT_OP_RE = /\b(commit|push|pull|merge|rebase|stash|fetch|cherry.?pick|amend|squash|tag|deploy|release|publish|rollback|revert)\b/i;
+
+export function isOperationalCommand(text: string): boolean {
+  const wordCount = text.trim().split(/\s+/).length;
+  // Short directives (≤10 words) containing a recognised git/deployment verb are
+  // contextually complete — they reference the current working state implicitly.
+  return wordCount <= 10 && GIT_OP_RE.test(text);
+}
+
 function isGarbled(text: string): boolean {
   const words = text.trim().split(/\s+/);
   if (words.length > 2) return false;
@@ -116,8 +129,9 @@ export function classifyPrompt(text: string, priorAssistantText?: string): Promp
   // Direct answer to a preceding assistant question is not vague
   if (priorAssistantText && assistantAskedQuestion(priorAssistantText)) return 'other';
 
-  // Skill/command names typed without a slash, and garbled text, are not vague prompts
-  if ((wordCount === 1 && isCommandLike(text.trim())) || isGarbled(text)) return 'other';
+  // Skill/command names typed without a slash, garbled text, and git/deployment
+  // operations are not vague prompts — they're self-contained directives
+  if ((wordCount === 1 && isCommandLike(text.trim())) || isGarbled(text) || isOperationalCommand(text)) return 'other';
 
   // Short prompts need a concrete anchor (file path or inline code) to escape the
   // vague gate — "fix auth.ts" is unambiguous; "make it work" is not
@@ -162,9 +176,10 @@ export function vagueScore(
   if (words > 200 || CONVERSATIONAL.test(text.trim())) return 0;
   // Direct answer to a preceding assistant question is never vague
   if (ctx?.priorAssistantText && assistantAskedQuestion(ctx.priorAssistantText)) return 0;
-  // Skill/command names and garbled text are not meaningful prompts to score
+  // Skill/command names, garbled text, and git/deployment operations are not
+  // meaningful prompts to score — they're self-contained directives
   const wordCount = text.trim().split(/\s+/).length;
-  if ((wordCount === 1 && isCommandLike(text.trim())) || isGarbled(text)) return 0;
+  if ((wordCount === 1 && isCommandLike(text.trim())) || isGarbled(text) || isOperationalCommand(text)) return 0;
   let score = 0;
   if (words < 5)  score += 4;
   else if (words < 10) score += 2;

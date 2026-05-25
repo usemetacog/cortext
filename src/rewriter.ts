@@ -50,9 +50,27 @@ function setCache(text: string, result: RewriteResult): void {
   saveCache(fresh);
 }
 
+// Git and deployment commands don't need file paths, code refs, or expected
+// outcomes — they operate on current repo state. Only flag them if there was
+// a correction turn (which may indicate branch/staging confusion).
+const GIT_OP_RE = /\b(commit|push|pull|merge|rebase|stash|fetch|cherry.?pick|amend|squash|tag|deploy|release|publish|rollback|revert)\b/i;
+
+function isGitOp(text: string, wordCount: number): boolean {
+  return wordCount <= 10 && GIT_OP_RE.test(text);
+}
+
 export function heuristicDiagnosis(prompt: UserPrompt): string {
   const text = prompt.text;
   const fixes: string[] = [];
+
+  // Git/deployment operations are contextually complete — skip structural checks.
+  // The only actionable diagnosis is if they caused a correction turn.
+  if (isGitOp(text, prompt.wordCount)) {
+    if (prompt.followedByCorrection) {
+      return 'Led to a correction — confirm staged files, branch, and commit message before issuing the command.';
+    }
+    return 'Prompt was flagged — review manually.';
+  }
 
   if (prompt.wordCount < 5) fixes.push(`too short to be actionable at ${prompt.wordCount} words — Claude had to infer your intent`);
   else if (prompt.wordCount < 10) fixes.push('too brief to act on without guessing');
@@ -70,6 +88,18 @@ export function heuristicDiagnosis(prompt: UserPrompt): string {
 
 export function heuristicBetter(prompt: UserPrompt): string {
   const text = prompt.text;
+
+  // Git/deployment operations don't need file paths or expected outcomes.
+  // If they caused a correction, the fix is checking pre-conditions, not adding structure.
+  if (isGitOp(text, prompt.wordCount)) {
+    const verb = text.match(GIT_OP_RE)?.[0]?.toLowerCase() ?? 'command';
+    if (verb === 'commit') return `${text} [ensure the right files are staged and the message is clear]`;
+    if (verb === 'push') return `${text} [confirm you're on the right branch first]`;
+    if (verb === 'merge') return `${text} [specify source and target branch if ambiguous]`;
+    if (verb === 'deploy' || verb === 'release' || verb === 'publish') return `${text} [confirm environment and that tests pass]`;
+    return `${text} [verify repo state is correct before running]`;
+  }
+
   const needsFile = !/[\/\.][a-z]/i.test(text);
   const needsOutcome = !/should|expected|want|need|instead|make it|so that/.test(text);
   const needsVerify = !prompt.hasVerification;
