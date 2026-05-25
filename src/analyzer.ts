@@ -44,6 +44,11 @@ const CORRECTION_WORDS = /^(no[,. ]|wait[,. ]|actually[,. ]|that'?s (wrong|not|i
 // Short conversational replies that aren't standalone prompts
 const CONVERSATIONAL = /^(yes|no|ok|okay|sure|sounds good|let'?s|continue|go ahead|agreed|great|perfect|thanks|cool|alright|got it|makes sense|i see|understood|yep|nope|hm|hmm|yup|right|exactly|correct|i agree|do it|proceed|done|nice|awesome|good|fine|works|that works|that'?s good|looks good|good job|well done|lgtm|ship it)\b/i;
 
+// Short action-continuation commands that are intentionally brief in an ongoing session.
+// These point at prior context ("commit this", "can we push it?") and are perfectly valid follow-ups.
+// They should never be flagged as vague.
+const ACTION_CONTINUATION_RE = /^(can\s+we\s+|let'?s\s+|please\s+)?(commit|push|ship|deploy|merge|run|test|build|apply|save|release|publish|stage|revert|reset|stash|pop|cherry-pick|squash|rebase)\s*(this|it|that|them|these|those|now)?\s*[?!.]?$/i;
+
 const CATEGORY_PATTERNS: Array<[PromptCategory, RegExp]> = [
   ['fix',       /\b(fix|bug|error|broken|not work(?:ing)?|issue|problem|fail(?:ing)?|crash(?:ing)?|wrong|debug|doesn'?t work|isn'?t work(?:ing)?)\b/i],
   ['refactor',  /\b(refactor|clean(?:\s+up)?|improve|optimize|rename|reorganize|restructure|simplify|prettier|format)\b/i],
@@ -119,6 +124,10 @@ export function classifyPrompt(text: string, priorAssistantText?: string): Promp
   // Skill/command names typed without a slash, and garbled text, are not vague prompts
   if ((wordCount === 1 && isCommandLike(text.trim())) || isGarbled(text)) return 'other';
 
+  // Action-continuation commands in an established session are intentionally brief.
+  // "commit this", "can we push it?" etc. are valid follow-ups — don't classify as vague.
+  if (wordCount <= 7 && ACTION_CONTINUATION_RE.test(text.trim()) && priorAssistantText) return 'other';
+
   // Short prompts need a concrete anchor (file path or inline code) to escape the
   // vague gate — "fix auth.ts" is unambiguous; "make it work" is not
   if (wordCount < 6) {
@@ -165,6 +174,9 @@ export function vagueScore(
   // Skill/command names and garbled text are not meaningful prompts to score
   const wordCount = text.trim().split(/\s+/).length;
   if ((wordCount === 1 && isCommandLike(text.trim())) || isGarbled(text)) return 0;
+  // Short action-continuation commands in an established session are intentional brevity.
+  // "commit this", "can we push it?" etc. are valid when prior context exists.
+  if (ctx && ctx.turnIndex > 0 && ACTION_CONTINUATION_RE.test(text.trim())) return 0;
   let score = 0;
   if (words < 5)  score += 4;
   else if (words < 10) score += 2;

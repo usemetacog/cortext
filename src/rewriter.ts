@@ -50,8 +50,22 @@ function setCache(text: string, result: RewriteResult): void {
   saveCache(fresh);
 }
 
+// Short action-continuation commands that are valid follow-ups in an ongoing session.
+// Duplicated from analyzer.ts — kept in sync to catch any that slip through scoring.
+const ACTION_CONTINUATION_RE = /^(can\s+we\s+|let'?s\s+|please\s+)?(commit|push|ship|deploy|merge|run|test|build|apply|save|release|publish|stage|revert|reset|stash|pop|cherry-pick|squash|rebase)\s*(this|it|that|them|these|those|now)?\s*[?!.]?$/i;
+
 export function heuristicDiagnosis(prompt: UserPrompt): string {
   const text = prompt.text;
+
+  // If this is a short action-continuation command and it's not the session opener,
+  // it was valid given context — the real issue (if any) is that the commit target
+  // was implicit rather than specified.
+  if (ACTION_CONTINUATION_RE.test(text.trim()) && prompt.contextBefore) {
+    return prompt.followedByCorrection
+      ? 'Valid follow-up command, but the implicit target caused a correction — name the file or branch explicitly.'
+      : 'Valid follow-up given the conversation context; nothing actionable to fix here.';
+  }
+
   const fixes: string[] = [];
 
   if (prompt.wordCount < 5) fixes.push(`too short to be actionable at ${prompt.wordCount} words — Claude had to infer your intent`);
