@@ -4,6 +4,7 @@ import { execFileSync } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import chalk from 'chalk';
 import { createSpinner } from './spinner';
+import { version } from '../package.json';
 import { readProjects, detectSubagentSessions } from './reader';
 import { analyze } from './analyzer';
 import { renderBehavior, renderMetrics, renderCoachReport, generateBehavioralAssumptions } from './renderer';
@@ -366,6 +367,8 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 async function main(): Promise<void> {
   const { command, days, analyze: shouldAnalyze, interactive: shouldInteract, force, help, web: shouldWeb, staged } = parseArgs(process.argv);
+
+  console.log(chalk.dim(`cortext v${version}`));
 
   if (help) {
     console.log(USAGE);
