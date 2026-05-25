@@ -183,7 +183,89 @@ function deltaTag(
   }
 }
 
-export function render(result: AnalysisResult, worstPromptData?: WorstPromptData, evalInsight?: string | null, delta?: PeriodDelta, goal?: Goal | null, harnessScore?: HarnessScore): void {
+export interface BehavioralRead {
+  text: string;
+  explanation?: string;
+  valence?: 'good' | 'warn' | 'bad';
+}
+
+export function generateBehavioralAssumptions(result: AnalysisResult, goal: Goal | null): BehavioralRead[] {
+  type Candidate = { priority: number; text: string; valence: 'good' | 'warn' | 'bad' };
+  const candidates: Candidate[] = [];
+
+  if (result.totalPrompts < 5) return [];
+
+  const vagueRate     = (result.promptCategories.vague    ?? 0) / (result.totalPrompts || 1);
+  const questionRate  = (result.promptCategories.question ?? 0) / (result.totalPrompts || 1);
+  const fixRate       = (result.promptCategories.fix      ?? 0) / (result.totalPrompts || 1);
+  const avgWords      = Math.round(result.avgPromptWords);
+  const corrPct       = result.correctionRate;
+  const verifyRate    = result.verificationRate;
+  const clearCount    = result.slashCommands['/clear'] ?? 0;
+  const clearPerSession = result.totalSessions > 0 ? clearCount / result.totalSessions : 0;
+  const actionableTotal = (result.promptCategories.implement ?? 0) + (result.promptCategories.fix ?? 0);
+
+  // Prompt length
+  if (avgWords < 8) {
+    candidates.push({ priority: 9, valence: 'bad',  text: `${avgWords} words/prompt — add outcome + constraints upfront` });
+  } else if (avgWords < 15) {
+    candidates.push({ priority: 5, valence: 'warn', text: `${avgWords} words/prompt — Claude filling in your intent` });
+  } else if (avgWords >= 25) {
+    candidates.push({ priority: 3, valence: 'good', text: `${avgWords} words/prompt — thorough; Claude acts autonomously` });
+  }
+
+  // Correction rate
+  if (corrPct > 0.2) {
+    candidates.push({ priority: 10, valence: 'bad',  text: `${pct(corrPct)} corrections — redirecting more than directing` });
+  } else if (corrPct > 0.12) {
+    candidates.push({ priority: 7,  valence: 'bad',  text: `${pct(corrPct)} corrections — specs need work; Claude keeps missing` });
+  } else if (corrPct > 0.06) {
+    candidates.push({ priority: 4,  valence: 'warn', text: `${pct(corrPct)} corrections — mostly landing first try` });
+  } else if (result.totalSessions >= 10) {
+    candidates.push({ priority: 4,  valence: 'good', text: `${pct(corrPct)} corrections — briefs consistently nailed on first try` });
+  }
+
+  // Vague rate
+  if (vagueRate > 0.12) {
+    candidates.push({ priority: 8, valence: 'bad',  text: `${Math.round(vagueRate * 100)}% vague prompts — ambiguity costs turns every time` });
+  } else if (vagueRate > 0.06) {
+    candidates.push({ priority: 5, valence: 'warn', text: `${Math.round(vagueRate * 100)}% vague prompts — some intent left implicit` });
+  }
+
+  // Question rate
+  if (questionRate > 0.2 && result.totalPrompts >= 20) {
+    candidates.push({ priority: 6, valence: 'warn', text: `${Math.round(questionRate * 100)}% question prompts — more exploring than directing` });
+  }
+
+  // Verification habit
+  if (actionableTotal >= 5 && verifyRate < 0.15) {
+    candidates.push({ priority: 7, valence: 'warn', text: `${pct(verifyRate)} verify rate — accepting output without confirming it` });
+  } else if (actionableTotal >= 5 && verifyRate >= 0.5) {
+    candidates.push({ priority: 3, valence: 'good', text: `${pct(verifyRate)} verify rate — confirmation loops built in; solid habit` });
+  }
+
+  // Context hygiene
+  if (result.totalSessions >= 15 && clearCount === 0) {
+    candidates.push({ priority: 6, valence: 'warn', text: `No /clear in ${result.totalSessions} sessions — stale context piling up` });
+  } else if (clearPerSession >= 0.3) {
+    candidates.push({ priority: 2, valence: 'good', text: `/clear ×${clearCount} — active context hygiene; clean-slate habit` });
+  }
+
+  // Fix/debug heavy
+  if (fixRate > 0.22 && result.totalPrompts >= 20) {
+    candidates.push({ priority: 5, valence: 'warn', text: `${Math.round(fixRate * 100)}% fix/debug — rework-heavy; spec more upfront` });
+  }
+
+  // Cache hit rate
+  if (result.cacheHitRate < 0.3 && result.totalSessions >= 5) {
+    candidates.push({ priority: 6, valence: 'bad',  text: `${pct(result.cacheHitRate)} cache hit — sessions too scattered to build context` });
+  }
+
+  candidates.sort((a, b) => b.priority - a.priority);
+  return candidates.slice(0, 3).map(c => ({ text: c.text, valence: c.valence }));
+}
+
+export function renderBehavior(result: AnalysisResult, worstPromptData?: WorstPromptData, evalInsight?: string | null, goal?: Goal | null, harnessScore?: HarnessScore, reads?: BehavioralRead[]): void {
   const lines: string[] = [];
 
   lines.push(top());
@@ -192,56 +274,36 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
     chalk.dim('  ·  ') +
     chalk.white('metacognition for your claude code prompts')
   ));
+  lines.push(line(chalk.dim(`${result.daysAnalyzed} days  ·  ${result.totalSessions} sessions  ·  ${result.totalPrompts} prompts`)));
   lines.push(divider());
 
-  // Overview
-  lines.push(sectionLabel('OVERVIEW'));
-  const sessionsStr  = `${result.totalSessions} sessions`;
-  const promptsStr   = `${result.totalPrompts} prompts`;
-  const daysStr      = `${result.daysAnalyzed} days`;
-  lines.push(line(chalk.dim(`${daysStr}  ·  ${sessionsStr}  ·  ${promptsStr}`)));
-  lines.push(blank());
-
-  // Build delta tags when available
-  const hasDelta = delta !== undefined;
-  const costTag       = hasDelta ? deltaTag(delta!.costPct !== null ? delta!.costPct * 100 : null, 'pct', false, NOISE_PCT) : '';
-  const cacheTag      = hasDelta ? deltaTag(delta!.cacheHitRatePp, 'pp', true, NOISE_PP) : '';
-  const wordsTag      = hasDelta ? deltaTag(delta!.medianWordsDelta, 'pp', true, 2) : '';
-
-  // Render overview metrics with optional delta tags inline
-  const costLabel  = 'API equiv. cost:';
-  const cacheLabel = 'Cache hit rate:';
-
-  if (hasDelta) {
-    // Each metric on its own line with delta tag
-    lines.push(line(`${costLabel.padEnd(18)}${formatCost(result.totalCost).padEnd(10)}${costTag}`));
-    lines.push(line(`${cacheLabel.padEnd(18)}${pct(result.cacheHitRate).padEnd(10)}${cacheTag}`));
-    lines.push(line(`${'Median prompt len:'.padEnd(18)}${(Math.round(result.avgPromptWords) + ' words').padEnd(10)}${wordsTag}`));
-  } else {
-    lines.push(line(`${costLabel.padEnd(16)}${formatCost(result.totalCost).padEnd(14)}${cacheLabel.padEnd(17)}${pct(result.cacheHitRate)}`));
-  }
-
-  const inputLabel  = 'Input tokens:';
-  const outputLabel = 'Output tokens:';
-  lines.push(line(`${inputLabel.padEnd(16)}${formatToken(result.totalInputTokens).padEnd(14)}${outputLabel.padEnd(17)}${formatToken(result.totalOutputTokens)}`));
-
-  lines.push(divider());
-
-  // Daily usage
-  if (result.dailyUsage.length > 0) {
-    lines.push(sectionLabel('DAILY USAGE  (last ' + result.daysAnalyzed + ' days)'));
-
-    const recent = result.dailyUsage.slice(-14);
-    const maxCost = Math.max(...recent.map(d => d.cost), 0.001);
-    const BAR_W = 18;
-
-    for (const day of recent) {
-      if (day.cost === 0 && day.outputTokens === 0) continue;
-      const dateStr = formatDate(day.date);
-      const b = bar(day.cost / maxCost, BAR_W);
-      const costStr = formatCost(day.cost).padStart(7);
-      const tokStr = formatToken(day.outputTokens).padStart(5);
-      lines.push(line(`${dateStr}  ${b}  ${tokStr} out  ${costStr}`));
+  // Behavioral reads — prominent first impression
+  const personaLabel = goal ? goal.label : 'a high-agency, high-taste operator';
+  const effectiveReads: BehavioralRead[] = reads ?? generateBehavioralAssumptions(result, goal ?? null);
+  if (effectiveReads.length > 0) {
+    lines.push(line(
+      chalk.bold.cyan('YOUR READS') +
+      chalk.dim('  for  ') +
+      chalk.white.bold(personaLabel)
+    ));
+    lines.push(blank());
+    for (let i = 0; i < effectiveReads.length; i++) {
+      const read = effectiveReads[i];
+      const readColor = read.valence === 'bad'  ? chalk.bold.red
+                      : read.valence === 'good' ? chalk.bold.green
+                      :                           chalk.bold.yellow;
+      const readWrapped = wrapText(read.text, INNER - 4);
+      lines.push(line(' ' + readColor('▸') + '  ' + readColor(readWrapped[0])));
+      for (let j = 1; j < readWrapped.length; j++) {
+        lines.push(line('    ' + readColor(readWrapped[j])));
+      }
+      if (read.explanation) {
+        const expWrapped = wrapText(read.explanation, INNER - 4);
+        for (const el of expWrapped) {
+          lines.push(line('    ' + chalk.dim(el)));
+        }
+      }
+      if (i < effectiveReads.length - 1) lines.push(blank());
     }
     lines.push(divider());
   }
@@ -320,22 +382,6 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
   }
   if (avgWords >= 25) {
     lines.push(line(chalk.green(`[✓] Prompts are detailed on average (${avgWords} words)`)));
-  }
-
-  // Top projects by cost
-  if (result.projectStats.length > 1) {
-    lines.push(divider());
-    lines.push(sectionLabel('TOP PROJECTS BY API COST'));
-
-    const maxProjectCost = Math.max(...result.projectStats.map(p => p.cost), 0.001);
-    const BAR_W = 20;
-    for (const ps of result.projectStats.slice(0, 6)) {
-      if (ps.cost === 0) continue;
-      const nameStr = ps.name.slice(0, 14).padEnd(14);
-      const costStr = formatCost(ps.cost).padStart(7);
-      const b = bar(ps.cost / maxProjectCost, BAR_W);
-      lines.push(line(`${nameStr}  ${costStr}  ${b}`));
-    }
   }
 
   // Week in Review
@@ -627,6 +673,85 @@ export function render(result: AnalysisResult, worstPromptData?: WorstPromptData
   if (!goal) {
     lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext goal') + chalk.dim('       to set a coaching goal')));
   }
+  lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext metrics') + chalk.dim('  for token/cost breakdown')));
+  lines.push(bottom());
+
+  console.log(lines.join('\n'));
+}
+
+export function renderMetrics(result: AnalysisResult, delta?: PeriodDelta): void {
+  const lines: string[] = [];
+
+  lines.push(top());
+  lines.push(line(
+    chalk.bold.white('cortext metrics') +
+    chalk.dim('  ·  ') +
+    chalk.white(`${result.daysAnalyzed}-day snapshot`)
+  ));
+  lines.push(line(chalk.dim(`${result.totalSessions} sessions  ·  ${result.totalPrompts} prompts`)));
+  lines.push(divider());
+
+  // Overview
+  lines.push(sectionLabel('OVERVIEW'));
+  lines.push(blank());
+
+  const hasDelta = delta !== undefined;
+  const costTag  = hasDelta ? deltaTag(delta!.costPct !== null ? delta!.costPct * 100 : null, 'pct', false, NOISE_PCT) : '';
+  const cacheTag = hasDelta ? deltaTag(delta!.cacheHitRatePp, 'pp', true, NOISE_PP) : '';
+  const wordsTag = hasDelta ? deltaTag(delta!.medianWordsDelta, 'pp', true, 2) : '';
+
+  const costLabel  = 'API equiv. cost:';
+  const cacheLabel = 'Cache hit rate:';
+
+  if (hasDelta) {
+    lines.push(line(`${costLabel.padEnd(18)}${formatCost(result.totalCost).padEnd(10)}${costTag}`));
+    lines.push(line(`${cacheLabel.padEnd(18)}${pct(result.cacheHitRate).padEnd(10)}${cacheTag}`));
+    lines.push(line(`${'Median prompt len:'.padEnd(18)}${(Math.round(result.avgPromptWords) + ' words').padEnd(10)}${wordsTag}`));
+  } else {
+    lines.push(line(`${costLabel.padEnd(16)}${formatCost(result.totalCost).padEnd(14)}${cacheLabel.padEnd(17)}${pct(result.cacheHitRate)}`));
+  }
+
+  const inputLabel  = 'Input tokens:';
+  const outputLabel = 'Output tokens:';
+  lines.push(line(`${inputLabel.padEnd(16)}${formatToken(result.totalInputTokens).padEnd(14)}${outputLabel.padEnd(17)}${formatToken(result.totalOutputTokens)}`));
+
+  // Daily usage
+  if (result.dailyUsage.length > 0) {
+    lines.push(divider());
+    lines.push(sectionLabel('DAILY USAGE  (last ' + result.daysAnalyzed + ' days)'));
+
+    const recent = result.dailyUsage.slice(-14);
+    const maxCost = Math.max(...recent.map(d => d.cost), 0.001);
+    const BAR_W = 18;
+
+    for (const day of recent) {
+      if (day.cost === 0 && day.outputTokens === 0) continue;
+      const dateStr = formatDate(day.date);
+      const b = bar(day.cost / maxCost, BAR_W);
+      const costStr = formatCost(day.cost).padStart(7);
+      const tokStr = formatToken(day.outputTokens).padStart(5);
+      lines.push(line(`${dateStr}  ${b}  ${tokStr} out  ${costStr}`));
+    }
+  }
+
+  // Top projects by cost
+  if (result.projectStats.length > 1) {
+    lines.push(divider());
+    lines.push(sectionLabel('TOP PROJECTS BY API COST'));
+
+    const maxProjectCost = Math.max(...result.projectStats.map(p => p.cost), 0.001);
+    const BAR_W = 20;
+    for (const ps of result.projectStats.slice(0, 6)) {
+      if (ps.cost === 0) continue;
+      const nameStr = ps.name.slice(0, 14).padEnd(14);
+      const costStr = formatCost(ps.cost).padStart(7);
+      const b = bar(ps.cost / maxProjectCost, BAR_W);
+      lines.push(line(`${nameStr}  ${costStr}  ${b}`));
+    }
+  }
+
+  lines.push(divider());
+  lines.push(line(chalk.dim('Run  ') + chalk.white('npx cortext') + chalk.dim('         for behavioral analysis')));
   lines.push(bottom());
 
   console.log(lines.join('\n'));

@@ -1,13 +1,14 @@
 import * as readline from 'readline';
 import { existsSync } from 'fs';
+import { execFileSync } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import chalk from 'chalk';
 import { readProjects, detectSubagentSessions } from './reader';
 import { analyze } from './analyzer';
-import { render, renderCoachReport } from './renderer';
+import { renderBehavior, renderMetrics, renderCoachReport, generateBehavioralAssumptions } from './renderer';
 import { auditConfig, computeHarnessScore } from './harness';
 import type { HarnessScore, BehavioralProfile } from './harness';
-import type { WorstPromptData } from './renderer';
+import type { WorstPromptData, BehavioralRead } from './renderer';
 import { analyzePrompts } from './suggester';
 import { runInteractive } from './interactive';
 import { ARCHETYPES, loadGoal, saveGoal } from './goals';
@@ -49,6 +50,8 @@ const USAGE = `
 Usage: npx cortext [command] [options]
 
 Commands:
+  run               Behavioral analysis — prompt patterns, efficiency signals, harness health (default)
+  metrics           Token/cost breakdown — spend, cache hit rate, daily usage, top projects
   goal              Set a coaching goal (interactive wizard)
   review            Run a coaching critique against your active goal
                     Works without an API key (heuristic mode); add ANTHROPIC_API_KEY for AI coaching
@@ -68,6 +71,9 @@ Note: ANTHROPIC_API_KEY is a separate Anthropic API key, not your Claude Pro/Max
 
 Examples:
   npx cortext
+  npx cortext run
+  npx cortext metrics
+  npx cortext metrics --days 7
   npx cortext quiz
   npx cortext quiz --staged
   npx cortext goal
@@ -125,6 +131,69 @@ Respond as raw JSON only. No markdown fences. Schema:
       frontloading: 'Opens sessions with full context so Claude can act autonomously.',
       efficiency: 'Achieves the goal with minimal back-and-forth and low correction rate.',
     };
+  }
+}
+
+function parseExplanationsJSON(text: string): string[] | null {
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+  try {
+    const parsed = JSON.parse(jsonMatch[0]) as { explanations?: unknown };
+    return Array.isArray(parsed.explanations) ? (parsed.explanations as string[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function generateReadExplanations(assumptions: string[], goal: Goal | null): Promise<string[] | null> {
+  if (assumptions.length === 0) return null;
+
+  const personaLabel = goal ? goal.label : 'a high-agency, high-taste operator';
+  const rubricLines = goal?.rubric
+    ? Object.entries(goal.rubric).map(([k, v]) => `${k}: ${v}`).join('\n')
+    : null;
+
+  const SYSTEM = `You are a blunt prompting coach. For each observed pattern, write ONE sentence (max 15 words) explaining why it helps or hurts the user's stated goal. Be specific to the goal — no generic advice. No hedging.
+
+Respond as raw JSON only. No markdown fences.
+Schema: { "explanations": ["≤15-word sentence", "≤15-word sentence", "≤15-word sentence"] }`;
+
+  const USER = `Goal: ${personaLabel}${rubricLines ? `\n\nRubric:\n${rubricLines}` : ''}
+
+Observed patterns:
+${assumptions.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
+
+  // Path 1 — direct Anthropic API key
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (apiKey) {
+    try {
+      const client = new Anthropic({ apiKey });
+      const response = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        system: SYSTEM,
+        messages: [{ role: 'user', content: USER }],
+      });
+      const text = response.content.find(b => b.type === 'text')?.text ?? '';
+      const result = parseExplanationsJSON(text);
+      if (result) return result;
+    } catch {
+      // fall through to CLI
+    }
+  }
+
+  // Path 2 — claude CLI (Pro/Max subscription)
+  try {
+    const raw = execFileSync(
+      'claude',
+      ['-p', '--system-prompt', SYSTEM, '--output-format', 'json',
+       '--no-session-persistence', '--model', 'haiku'],
+      { input: USER, encoding: 'utf-8', timeout: 30000 }
+    ) as string;
+    const outer = JSON.parse(raw) as { result?: string };
+    return parseExplanationsJSON(outer.result ?? '');
+  } catch {
+    return null;
   }
 }
 
@@ -250,7 +319,7 @@ async function runReview(days: number, force: boolean): Promise<void> {
 }
 
 interface ParsedArgs {
-  command: 'dashboard' | 'goal' | 'review' | 'quiz';
+  command: 'dashboard' | 'goal' | 'review' | 'quiz' | 'metrics';
   days: number;
   analyze: boolean;
   interactive: boolean;
@@ -282,6 +351,12 @@ function parseArgs(argv: string[]): ParsedArgs {
     i = 1;
   } else if (args[0] === 'quiz') {
     command = 'quiz';
+    i = 1;
+  } else if (args[0] === 'metrics') {
+    command = 'metrics';
+    i = 1;
+  } else if (args[0] === 'run') {
+    command = 'dashboard';
     i = 1;
   }
 
@@ -332,6 +407,49 @@ async function main(): Promise<void> {
     process.exit(passed ? 0 : 1);
   }
 
+  if (command === 'metrics') {
+    const spinner = createSpinner('Loading cortext…');
+    spinner.start();
+
+    const projects = readProjects(days);
+    if (projects.length === 0) {
+      spinner.stop();
+      console.error(
+        '\nNo Claude Code session data found in ~/.claude/projects/\n' +
+        'Make sure you have Claude Code installed and have run at least one session.\n'
+      );
+      process.exit(1);
+    }
+
+    const result = analyze(projects, days);
+    const priorProjects = readProjects(days, days);
+    const priorResult = priorProjects.length > 0 ? analyze(priorProjects, days) : null;
+
+    const MIN_PRIOR_SESSIONS = 10;
+    let delta: PeriodDelta | undefined;
+    if (priorResult && priorResult.totalSessions >= MIN_PRIOR_SESSIONS) {
+      delta = {
+        costPct: priorResult.totalCost > 0
+          ? (result.totalCost - priorResult.totalCost) / priorResult.totalCost
+          : null,
+        cacheHitRatePp: (result.cacheHitRate - priorResult.cacheHitRate) * 100,
+        medianWordsDelta: result.avgPromptWords - priorResult.avgPromptWords,
+        priorSessions: priorResult.totalSessions,
+      };
+    } else {
+      delta = {
+        costPct: null,
+        cacheHitRatePp: null,
+        medianWordsDelta: null,
+        priorSessions: priorResult?.totalSessions ?? 0,
+      };
+    }
+
+    spinner.stop();
+    renderMetrics(result, delta);
+    return;
+  }
+
   // default: dashboard
   const spinner = createSpinner('Loading cortext…');
   spinner.start();
@@ -375,30 +493,6 @@ async function main(): Promise<void> {
   };
   const harnessScore: HarnessScore = computeHarnessScore(configAudit, behavioralProfile, result.totalSessions);
 
-  // Compute prior period for period-over-period deltas
-  const priorProjects = readProjects(days, days);
-  const priorResult = priorProjects.length > 0 ? analyze(priorProjects, days) : null;
-
-  const MIN_PRIOR_SESSIONS = 10;
-  let delta: PeriodDelta | undefined;
-  if (priorResult && priorResult.totalSessions >= MIN_PRIOR_SESSIONS) {
-    delta = {
-      costPct: priorResult.totalCost > 0
-        ? (result.totalCost - priorResult.totalCost) / priorResult.totalCost
-        : null,
-      cacheHitRatePp: (result.cacheHitRate - priorResult.cacheHitRate) * 100,
-      medianWordsDelta: result.avgPromptWords - priorResult.avgPromptWords,
-      priorSessions: priorResult.totalSessions,
-    };
-  } else {
-    delta = {
-      costPct: null,
-      cacheHitRatePp: null,
-      medianWordsDelta: null,
-      priorSessions: priorResult?.totalSessions ?? 0,
-    };
-  }
-
   const vagueRate = result.promptCategories.vague / (result.totalPrompts || 1);
   checkAndLogOutcomes(result.correctionRate, vagueRate);
 
@@ -411,6 +505,18 @@ async function main(): Promise<void> {
     }
   }
 
+  // Behavioral reads — heuristic always, LLM explanations if API key present
+  const goal = loadGoal();
+  const baseReads = generateBehavioralAssumptions(result, goal ?? null);
+  let reads: BehavioralRead[] | undefined;
+  if (baseReads.length > 0) {
+    const explanations = await generateReadExplanations(baseReads.map(r => r.text), goal ?? null);
+    reads = baseReads.map((r, i) => ({
+      ...r,
+      explanation: explanations?.[i],
+    }));
+  }
+
   spinner.stop();
 
   if (shouldWeb) {
@@ -418,8 +524,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const goal = loadGoal();
-  render(result, worstPromptData, loadOutcomeInsight(), delta, goal, harnessScore);
+  renderBehavior(result, worstPromptData, loadOutcomeInsight(), goal, harnessScore, reads);
 
   if (shouldAnalyze) {
     if (result.worstPrompts.length === 0) {

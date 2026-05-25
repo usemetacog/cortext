@@ -12,77 +12,57 @@ function makePrompt(overrides: Partial<UserPrompt>): UserPrompt {
     category: 'vague',
     vagueScore: 5,
     followedByCorrection: false,
+    hasVerification: false,
     ...overrides,
   };
 }
 
 describe('heuristicDiagnosis', () => {
-  it('flags very short prompts as too short to be actionable', () => {
+  it('returns null for system artifacts like [Request interrupted by user]', () => {
+    const result = heuristicDiagnosis(makePrompt({ text: '[Request interrupted by user]', wordCount: 4 }));
+    expect(result).toBeNull();
+  });
+
+  it('flags very short prompts with a specific, prompt-anchored diagnosis', () => {
     const result = heuristicDiagnosis(makePrompt({ text: 'do it', wordCount: 2 }));
-    expect(result).toContain('too short to be actionable');
+    expect(result).not.toBeNull();
+    expect(result).toContain('2 words');
+    expect(result).toContain('"do it"');
   });
 
-  it('flags 5–9 word prompts as too brief', () => {
-    const text = 'please update the settings page now';
+  it('flags vague pronoun references in short prompts', () => {
+    const text = 'whats the conversation ?';
+    const result = heuristicDiagnosis(makePrompt({ text, wordCount: 4 }));
+    expect(result).not.toBeNull();
+    expect(result).toContain('"the conversation"');
+    expect(result).toContain('no referent');
+  });
+
+  it('flags vague "the issue" references', () => {
+    const text = 'what was the issue?';
+    const result = heuristicDiagnosis(makePrompt({ text, wordCount: 4 }));
+    expect(result).not.toBeNull();
+    expect(result).toContain('"the issue"');
+  });
+
+  it('flags prompts that are missing a file path when borderline short', () => {
+    const text = 'fix the bug in auth module';
     const result = heuristicDiagnosis(makePrompt({ text, wordCount: 6 }));
-    expect(result).toContain('too brief');
+    expect(result).not.toBeNull();
   });
 
-  it('flags missing file path', () => {
-    const result = heuristicDiagnosis(makePrompt({ text: 'fix the function that returns null', wordCount: 7 }));
-    expect(result).toContain('no file path');
+  it('returns null for well-formed prompts with file path, symbol, and outcome', () => {
+    const text = 'fix `handleLogin` in src/auth.ts — it should redirect to /dashboard but returns 401';
+    const result = heuristicDiagnosis(makePrompt({ text, wordCount: 15, followedByCorrection: false }));
+    expect(result).toBeNull();
   });
 
-  it('does not flag file path when one is present', () => {
-    const text = 'fix the function in src/auth/login.ts that returns null sometimes';
-    const result = heuristicDiagnosis(makePrompt({ text, wordCount: 12 }));
-    expect(result).not.toContain('no file path');
-  });
-
-  it('flags missing code reference', () => {
-    const text = 'fix the function that returns null in the auth module today';
-    const result = heuristicDiagnosis(makePrompt({ text, wordCount: 11 }));
-    expect(result).toContain('no code reference');
-  });
-
-  it('does not flag code reference when backtick code is present', () => {
-    const text = 'fix `getUserById` which returns null in the auth module here';
-    const result = heuristicDiagnosis(makePrompt({ text, wordCount: 11 }));
-    expect(result).not.toContain('no code reference');
-  });
-
-  it('flags missing expected outcome', () => {
-    const text = 'the button does not respond when the user clicks on it here';
-    const result = heuristicDiagnosis(makePrompt({ text, wordCount: 13 }));
-    expect(result).toContain('no expected outcome');
-  });
-
-  it('does not flag expected outcome when outcome words are present', () => {
-    const text = 'the button should submit the form but nothing happens when clicked';
-    const result = heuristicDiagnosis(makePrompt({ text, wordCount: 12 }));
-    expect(result).not.toContain('no expected outcome');
-  });
-
-  it('flags correction turns', () => {
-    const result = heuristicDiagnosis(makePrompt({
-      text: 'fix the login flow in src/auth.ts with `handleLogin` — should redirect on success',
-      wordCount: 15,
-      followedByCorrection: true,
-    }));
-    expect(result).toContain('led directly to a correction turn');
-  });
-
-  it('does not flag structural issues for git/deployment operations', () => {
-    // "commit this" has no file path, code ref, or expected outcome — but it's a git op
+  it('returns null for git ops that did NOT cause a correction', () => {
     const commitDiag = heuristicDiagnosis(makePrompt({ text: 'commit this', wordCount: 2 }));
-    expect(commitDiag).not.toContain('no file path');
-    expect(commitDiag).not.toContain('no code reference');
-    expect(commitDiag).not.toContain('no expected outcome');
-    expect(commitDiag).not.toContain('too short to be actionable');
+    expect(commitDiag).toBeNull();
 
     const pushDiag = heuristicDiagnosis(makePrompt({ text: 'can we commit it?', wordCount: 4 }));
-    expect(pushDiag).not.toContain('no file path');
-    expect(pushDiag).not.toContain('no code reference');
+    expect(pushDiag).toBeNull();
   });
 
   it('produces a correction-specific diagnosis for git ops that caused corrections', () => {
@@ -91,17 +71,36 @@ describe('heuristicDiagnosis', () => {
       wordCount: 2,
       followedByCorrection: true,
     }));
+    expect(result).not.toBeNull();
     expect(result).toContain('correction');
     expect(result).not.toContain('no file path');
   });
 
-  it('returns fallback message when no issues found', () => {
-    const text = 'fix `handleLogin` in src/auth.ts — it should redirect to /dashboard but returns 401';
+  it('flags correction turns with a prompt-specific message', () => {
     const result = heuristicDiagnosis(makePrompt({
-      text,
+      text: 'fix the login flow in src/auth.ts with `handleLogin` — should redirect on success',
       wordCount: 15,
-      followedByCorrection: false,
+      followedByCorrection: true,
     }));
-    expect(result).toBe('Prompt was flagged — review manually.');
+    expect(result).not.toBeNull();
+    expect(result).toContain('correction');
+  });
+
+  it('never produces the old generic checklist phrasing', () => {
+    const prompts = [
+      makePrompt({ text: 'do it', wordCount: 2 }),
+      makePrompt({ text: 'please update the settings page now', wordCount: 6 }),
+      makePrompt({ text: 'fix the function that returns null', wordCount: 7 }),
+    ];
+    for (const p of prompts) {
+      const result = heuristicDiagnosis(p);
+      if (result !== null) {
+        expect(result).not.toContain('Several issues:');
+        expect(result).not.toContain('no file path');
+        expect(result).not.toContain('no code reference');
+        expect(result).not.toContain('no expected outcome');
+        expect(result).not.toBe('Prompt was flagged — review manually.');
+      }
+    }
   });
 });

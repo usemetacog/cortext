@@ -59,31 +59,55 @@ function isGitOp(text: string, wordCount: number): boolean {
   return wordCount <= 10 && GIT_OP_RE.test(text);
 }
 
-export function heuristicDiagnosis(prompt: UserPrompt): string {
-  const text = prompt.text;
-  const fixes: string[] = [];
+// System artifacts injected by the runtime — not real user prompts.
+const SYSTEM_ARTIFACT_RE = /^\[(?:Request interrupted|Tool execution interrupted|Interrupted|System|Error)\b/i;
 
-  // Git/deployment operations are contextually complete — skip structural checks.
-  // The only actionable diagnosis is if they caused a correction turn.
+/**
+ * Returns a specific, prose-based diagnosis for why this prompt fell short,
+ * or null when no insightful diagnosis can be produced (generic structural
+ * checklists don't count — the entry should be skipped entirely).
+ */
+export function heuristicDiagnosis(prompt: UserPrompt): string | null {
+  const text = prompt.text.trim();
+
+  // Skip system artifacts — these are runtime messages, not user prompts.
+  if (SYSTEM_ARTIFACT_RE.test(text)) return null;
+
+  // Git/deployment ops: only insightful when they caused a correction.
   if (isGitOp(text, prompt.wordCount)) {
     if (prompt.followedByCorrection) {
-      return 'Led to a correction — confirm staged files, branch, and commit message before issuing the command.';
+      return `"${text}" caused a correction turn — before issuing this command, confirm staged files, the target branch, and that the commit message reflects what actually changed.`;
     }
-    return 'Prompt was flagged — review manually.';
+    return null;
   }
 
-  if (prompt.wordCount < 5) fixes.push(`too short to be actionable at ${prompt.wordCount} words — Claude had to infer your intent`);
-  else if (prompt.wordCount < 10) fixes.push('too brief to act on without guessing');
+  const parts: string[] = [];
 
-  if (!/[\/\.][a-z]/i.test(text)) fixes.push('no file path — add it so Claude knows exactly what to touch');
-  if (!/`[^`]+`/.test(text)) fixes.push('no code reference — include the relevant symbol or snippet in backticks');
-  if (!/should|expected|want|need|instead/.test(text)) fixes.push('no expected outcome — state it: "should X", "expected Y", or "instead of Z"');
-  if (prompt.followedByCorrection) fixes.push('led directly to a correction turn — the prompt left too much to interpretation');
+  // Anchor the diagnosis to the actual prompt text.
+  const quoted = `"${text.length > 50 ? text.slice(0, 47) + '…' : text}"`;
 
-  if (fixes.length === 0) return 'Prompt was flagged — review manually.';
-  return fixes.length === 1
-    ? fixes[0] + '.'
-    : 'Several issues: ' + fixes.join('; ') + '.';
+  // Vague pronoun/article references ("the conversation", "the issue", "this thing")
+  const vagueRefs = [...text.matchAll(/\b(?:the|this|that|these|those)\s+(\w+)/gi)];
+  if (vagueRefs.length > 0 && prompt.wordCount < 12) {
+    const nouns = vagueRefs.map(m => `"${m[0].toLowerCase()}"`).slice(0, 2).join(' and ');
+    parts.push(`${quoted} uses ${nouns} with no referent — Claude has no anchor for what ${vagueRefs.length === 1 ? 'that' : 'these'} refer${vagueRefs.length === 1 ? 's' : ''} to`);
+  } else if (prompt.wordCount < 5) {
+    parts.push(`${quoted} is ${prompt.wordCount} words — there's no file, no context, and no stated goal for Claude to act on`);
+  } else if (prompt.wordCount < 10 && !/[\/\.][a-z]/i.test(text)) {
+    parts.push(`${quoted} gives Claude the what but not the where — without a file path or symbol, Claude has to guess the target`);
+  }
+
+  if (prompt.followedByCorrection && parts.length > 0) {
+    parts.push('and it led to a correction turn, confirming Claude had to interpret rather than act');
+  } else if (prompt.followedByCorrection) {
+    // Correction without other specific signals — only show if we can explain why.
+    parts.push(`${quoted} led directly to a correction — the prompt left enough ambiguity that Claude's first attempt missed the mark`);
+  }
+
+  // Nothing prompt-specific to say — skip rather than emit a generic checklist.
+  if (parts.length === 0) return null;
+
+  return parts.join(', ') + '.';
 }
 
 export function heuristicBetter(prompt: UserPrompt): string {

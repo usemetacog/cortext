@@ -23,9 +23,12 @@ export async function analyzePrompts(prompts: UserPrompt[]): Promise<void> {
   if (!apiKey) {
     // Heuristic fallback — no API call required
     renderAnalysisHeader();
-    for (let i = 0; i < prompts.length; i++) {
-      const p = prompts[i];
-      renderAnalysisEntry(i + 1, p.text, heuristicDiagnosis(p), heuristicBetter(p));
+    let shown = 0;
+    for (const p of prompts) {
+      const diagnosis = heuristicDiagnosis(p);
+      if (!diagnosis) continue;
+      renderAnalysisEntry(shown + 1, p.text, diagnosis, heuristicBetter(p));
+      shown++;
     }
     renderAnalysisFooter();
     console.log('  (Heuristic analysis — no API call made. Add ANTHROPIC_API_KEY for AI-powered rewrites.)');

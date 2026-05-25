@@ -214,12 +214,12 @@ export function runHeuristicCoach(result: AnalysisResult, goal: Goal): CoachRepo
       ? `${pct(result.verificationRate)} of actionable prompts include verify criteria — aim for 50%+.`
       : `${pct(result.verificationRate)} of actionable prompts include verification — above average.`;
 
-  // Worst moments via heuristics
-  const worstMoments = result.worstPrompts.slice(0, 3).map((p: UserPrompt) => ({
-    original:  p.text,
-    diagnosis: heuristicDiagnosis(p),
-    better:    heuristicBetter(p),
-  }));
+  // Worst moments via heuristics — only include entries with a specific diagnosis.
+  const worstMoments = result.worstPrompts.slice(0, 5).flatMap((p: UserPrompt) => {
+    const diagnosis = heuristicDiagnosis(p);
+    if (!diagnosis) return [];
+    return [{ original: p.text, diagnosis, better: heuristicBetter(p) }];
+  }).slice(0, 3);
 
   // Strengths & gaps
   const scores = { specificityScore, ownershipScore, toolScore, frontloadingScore, verificationScore, ctxMgmtScore };
