@@ -370,30 +370,37 @@ async function main(): Promise<void> {
 
   console.log(chalk.dim(`cortext v${version}`));
 
+  // Start spinner immediately after version line for every command
+  const startupSpinner = createSpinner('Loading…');
+  startupSpinner.start();
+
   if (help) {
+    startupSpinner.stop();
     console.log(USAGE);
     return;
   }
 
   if (command === 'goal') {
+    startupSpinner.stop();
     const g = await runGoalWizard();
     if (g) console.log(chalk.dim('Run ') + chalk.white('npx cortext review') + chalk.dim(' to get your first coaching report.\n'));
     return;
   }
 
   if (command === 'review') {
+    startupSpinner.stop();
     await runReview(days, force);
     return;
   }
 
   if (command === 'quiz') {
+    startupSpinner.stop();
     const passed = await runQuiz(staged);
     process.exit(passed ? 0 : 1);
   }
 
   if (command === 'metrics') {
-    const spinner = createSpinner('Loading cortext…');
-    spinner.start();
+    const spinner = startupSpinner;
 
     const projects = readProjects(days);
     if (projects.length === 0) {
@@ -435,8 +442,7 @@ async function main(): Promise<void> {
   }
 
   // default: dashboard
-  const spinner = createSpinner('Loading cortext…');
-  spinner.start();
+  const spinner = startupSpinner;
 
   const projects = readProjects(days);
 
