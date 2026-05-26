@@ -15,6 +15,19 @@ IMPORTANT: https://code.claude.com/docs/en/best-practices is the authoritative r
 
 IMPORTANT: When generating suggestions, coaching feedback, prompt rewrites, or any user-facing advice (in `review`, `rewriter`, the goal system, or any future surface), the Claude Code best practices at https://code.claude.com/docs/en/best-practices must be the heaviest weight. Concrete examples from the docs (e.g. specific prompt structures, /clear usage, subagent delegation, CLAUDE.md tips) are preferred over generic advice. If a suggestion isn't grounded in these docs, it should not be the lead recommendation.
 
+## Design System
+
+Always read DESIGN.md before making any visual or UI changes to `src/renderer.ts`.
+All color semantics, section ordering, bar valence, and layout decisions are defined there.
+Do not deviate without explicit user approval.
+
+Key rules derived from DESIGN.md:
+- `chalk.cyan` is reserved for rewrite text only — never section labels or bars
+- Section labels go inside the divider line via `namedDivider()`, not above content
+- Bars accept a `valence` param — `vague` category is always `'warn'` (yellow fill)
+- Behavioral Reads lead with no "YOUR READS" label above them
+- Header is one line: `cortext · N days · N sessions · N prompts` (no tagline)
+
 ## Skill routing
 
 When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
