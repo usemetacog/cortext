@@ -430,6 +430,8 @@ async function main(): Promise<void> {
         cacheHitRatePp: (result.cacheHitRate - priorResult.cacheHitRate) * 100,
         medianWordsDelta: result.avgPromptWords - priorResult.avgPromptWords,
         priorSessions: priorResult.totalSessions,
+        vagueRatePp: null,
+        correctionRatePp: null,
       };
     } else {
       delta = {
@@ -437,6 +439,8 @@ async function main(): Promise<void> {
         cacheHitRatePp: null,
         medianWordsDelta: null,
         priorSessions: priorResult?.totalSessions ?? 0,
+        vagueRatePp: null,
+        correctionRatePp: null,
       };
     }
 
@@ -460,6 +464,22 @@ async function main(): Promise<void> {
   }
 
   const result = analyze(projects, days);
+
+  // Prior-period delta for trend-aware behavioral reads
+  const priorProjects = readProjects(days, days);
+  const priorResult = priorProjects.length > 0 ? analyze(priorProjects, days) : null;
+  const MIN_PRIOR_SESSIONS = 10;
+  const behaviorDelta: PeriodDelta | undefined = (priorResult && priorResult.totalSessions >= MIN_PRIOR_SESSIONS)
+    ? {
+        costPct: null,
+        cacheHitRatePp: null,
+        medianWordsDelta: null,
+        priorSessions: priorResult.totalSessions,
+        vagueRatePp: ((result.promptCategories.vague / (result.totalPrompts || 1)) -
+                      (priorResult.promptCategories.vague / (priorResult.totalPrompts || 1))) * 100,
+        correctionRatePp: (result.correctionRate - priorResult.correctionRate) * 100,
+      }
+    : undefined;
 
   // Harness health assembly
   // Prefer the directory cortext is invoked from; fall back to the top project
@@ -501,7 +521,7 @@ async function main(): Promise<void> {
 
   // Behavioral reads — heuristic always, LLM explanations if API key present
   const goal = loadGoal();
-  const baseReads = generateBehavioralAssumptions(result, goal ?? null);
+  const baseReads = generateBehavioralAssumptions(result, goal ?? null, behaviorDelta);
   let reads: BehavioralRead[] | undefined;
   if (baseReads.length > 0) {
     const explanations = await generateReadExplanations(baseReads.map(r => r.text), goal ?? null);

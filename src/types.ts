@@ -149,6 +149,8 @@ export interface PeriodDelta {
   cacheHitRatePp: number | null;   // pp change in cache hit rate
   medianWordsDelta: number | null; // change in median prompt word count
   priorSessions: number;           // number of sessions in the prior period
+  vagueRatePp: number | null;      // pp change in vague rate (positive = more vague = worse)
+  correctionRatePp: number | null; // pp change in correction rate (positive = more corrections = worse)
 }
 
 // ── Unread response moments ────────────────────────────────────

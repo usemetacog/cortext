@@ -189,7 +189,7 @@ export interface BehavioralRead {
   valence?: 'good' | 'warn' | 'bad';
 }
 
-export function generateBehavioralAssumptions(result: AnalysisResult, goal: Goal | null): BehavioralRead[] {
+export function generateBehavioralAssumptions(result: AnalysisResult, goal: Goal | null, delta?: PeriodDelta): BehavioralRead[] {
   type Candidate = { priority: number; text: string; valence: 'good' | 'warn' | 'bad' };
   const candidates: Candidate[] = [];
 
@@ -224,12 +224,27 @@ export function generateBehavioralAssumptions(result: AnalysisResult, goal: Goal
   } else if (result.totalSessions >= 10) {
     candidates.push({ priority: 4,  valence: 'good', text: `${pct(corrPct)} corrections — briefs consistently nailed on first try` });
   }
+  if (delta?.correctionRatePp != null && Math.abs(delta.correctionRatePp) > NOISE_PP && candidates.length > 0) {
+    const last = candidates[candidates.length - 1];
+    last.text += delta.correctionRatePp > 0
+      ? ` — ▲ +${Math.round(delta.correctionRatePp)}pp this period — worsening`
+      : ` — ▼ ${Math.abs(Math.round(delta.correctionRatePp))}pp this period — keep going`;
+  }
 
   // Vague rate
   if (vagueRate > 0.12) {
     candidates.push({ priority: 8, valence: 'bad',  text: `${Math.round(vagueRate * 100)}% vague prompts — ambiguity costs turns every time` });
   } else if (vagueRate > 0.06) {
     candidates.push({ priority: 5, valence: 'warn', text: `${Math.round(vagueRate * 100)}% vague prompts — some intent left implicit` });
+  }
+  if (delta?.vagueRatePp != null && Math.abs(delta.vagueRatePp) > NOISE_PP && candidates.length > 0) {
+    const last = candidates[candidates.length - 1];
+    // only annotate if the last candidate is actually a vague-rate read
+    if (last.text.includes('vague prompts')) {
+      last.text += delta.vagueRatePp > 0
+        ? ` — ▲ +${Math.round(delta.vagueRatePp)}pp this period — worsening`
+        : ` — ▼ ${Math.abs(Math.round(delta.vagueRatePp))}pp this period — keep going`;
+    }
   }
 
   // Question rate
