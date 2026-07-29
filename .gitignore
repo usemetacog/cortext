@@ -3,3 +3,4 @@ dist/
 *.log
 plans/*.private.md
 .DS_Store
+.gstack/

@@ -265,6 +265,66 @@ function median(arr: number[]): number | null {
   return s[Math.floor(s.length / 2)];
 }
 
+// ── Single-session scoring (ambient hook) ──────────────────────────
+// Slimmed-down variant of the analyze() session loop above: no cost/token
+// tracking, no cross-session aggregation — just the signals the ambient
+// Stop hook needs to decide whether a single session is worth a nudge.
+
+export interface SessionSignal {
+  promptCount: number;
+  vagueCount: number; // prompts with vagueScore >= 3
+  correctionCount: number;
+}
+
+export function scoreSessionEntries(entries: RawEntry[]): SessionSignal {
+  const sorted = entries
+    .filter(e => e.timestamp)
+    .sort((a, b) => new Date(a.timestamp!).getTime() - new Date(b.timestamp!).getTime());
+
+  const messageSequence: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+  for (const entry of sorted) {
+    if (entry.type === 'assistant' && entry.message?.usage) {
+      messageSequence.push({ role: 'assistant', text: extractMessageText('assistant', '', entry, 3000) });
+    }
+    if (entry.type === 'user' && entry.message?.content) {
+      const text = extractUserText(entry.message.content);
+      if (text) messageSequence.push({ role: 'user', text });
+    }
+  }
+
+  let promptCount = 0;
+  let vagueCount = 0;
+  let correctionCount = 0;
+  let userTurnIndex = 0;
+
+  for (let i = 0; i < messageSequence.length; i++) {
+    const msg = messageSequence[i];
+    if (msg.role !== 'user') continue;
+    promptCount++;
+
+    const prevMsg = messageSequence[i - 1];
+    const priorAssistantText = prevMsg?.role === 'assistant' ? prevMsg.text : undefined;
+
+    if (prevMsg?.role === 'assistant' && CORRECTION_WORDS.test(msg.text)) {
+      correctionCount++;
+    }
+
+    let priorUserWords = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      if (messageSequence[j].role === 'user') {
+        priorUserWords = messageSequence[j].text.split(/\s+/).length;
+        break;
+      }
+    }
+
+    const score = vagueScore(msg.text, { turnIndex: userTurnIndex, priorUserWords, priorAssistantText });
+    if (score >= 3) vagueCount++;
+    userTurnIndex++;
+  }
+
+  return { promptCount, vagueCount, correctionCount };
+}
+
 export function analyze(projects: ProjectData[], days: number): AnalysisResult {
   const dailyMap = new Map<string, DailyUsage>();
   const projectStatsMap = new Map<string, ProjectStats>();

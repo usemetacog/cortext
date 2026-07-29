@@ -1,5 +1,5 @@
 import * as readline from 'readline';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import chalk from 'chalk';
@@ -20,6 +20,9 @@ import { generateRewrite, heuristicDiagnosis, hashPrompt } from './rewriter';
 import { logRewriteShown, checkAndLogOutcomes, loadOutcomeInsight } from './evallog';
 import { generateUnreadCallout } from './unread';
 import { startWebServer } from './server';
+import { openShareCard } from './share';
+import { runAmbientHook, type StopHookPayload } from './ambient';
+import { enableHook, disableHook, hookStatus } from './hookinstall';
 import { runQuiz } from './quiz';
 import { installSkill } from './skill';
 import type { Goal, GoalRubric, PeriodDelta } from './types';
@@ -35,12 +38,16 @@ Commands:
   review            Run a coaching critique against your active goal
                     Works without an API key (heuristic mode); add ANTHROPIC_API_KEY for AI coaching
   quiz              Quiz yourself on your current git diff (needs ANTHROPIC_API_KEY)
+  hook enable       Opt in to the ambient Stop hook — one local, silent-by-default nudge per session
+  hook disable      Turn it back off
+  hook status       Show whether it's currently enabled
 
 Options:
   --days <n>        Analyze last n days (default: 30)
   --force           Regenerate review even if one was run in the last 7 days
   --staged          Quiz on staged changes only (default: all uncommitted changes)
   --web             Open browser dashboard
+  --share           Generate a shareable stats card (opens in browser, download or copy as PNG)
   --analyze         Prompt improvement suggestions (heuristic without key; AI with ANTHROPIC_API_KEY)
   --interactive     Chat with Claude about your stats (needs ANTHROPIC_API_KEY)
   --help            Show this help
@@ -301,26 +308,32 @@ async function runReview(days: number, force: boolean): Promise<void> {
   }
 }
 
+type HookAction = 'enable' | 'disable' | 'status' | 'run';
+
 interface ParsedArgs {
-  command: 'dashboard' | 'goal' | 'review' | 'quiz' | 'metrics';
+  command: 'dashboard' | 'goal' | 'review' | 'quiz' | 'metrics' | 'hook';
+  hookAction: HookAction | null;
   days: number;
   analyze: boolean;
   interactive: boolean;
   force: boolean;
   help: boolean;
   web: boolean;
+  share: boolean;
   staged: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
   let command: ParsedArgs['command'] = 'dashboard';
+  let hookAction: HookAction | null = null;
   let days = 30;
   let analyze = false;
   let interactive = false;
   let force = false;
   let help = false;
   let web = false;
+  let share = false;
   let staged = false;
 
   let i = 0;
@@ -341,6 +354,11 @@ function parseArgs(argv: string[]): ParsedArgs {
   } else if (args[0] === 'run') {
     command = 'dashboard';
     i = 1;
+  } else if (args[0] === 'hook') {
+    command = 'hook';
+    const action = args[1];
+    hookAction = action === 'enable' || action === 'disable' || action === 'run' ? action : 'status';
+    i = 2;
   }
 
   for (; i < args.length; i++) {
@@ -358,16 +376,59 @@ function parseArgs(argv: string[]): ParsedArgs {
       staged = true;
     } else if (args[i] === '--web') {
       web = true;
+    } else if (args[i] === '--share') {
+      share = true;
     } else if (args[i] === '--help' || args[i] === '-h') {
       help = true;
     }
   }
 
-  return { command, days, analyze, interactive, force, help, web, staged };
+  return { command, hookAction, days, analyze, interactive, force, help, web, share, staged };
 }
 
 async function main(): Promise<void> {
-  const { command, days, analyze: shouldAnalyze, interactive: shouldInteract, force, help, web: shouldWeb, staged } = parseArgs(process.argv);
+  const { command, hookAction, days, analyze: shouldAnalyze, interactive: shouldInteract, force, help, web: shouldWeb, share: shouldShare, staged } = parseArgs(process.argv);
+
+  // `hook run` is invoked by Claude Code itself as a Stop hook command — it
+  // must print nothing but the exact hookSpecificOutput JSON (or nothing at
+  // all) and exit fast. No version banner, no spinner, no skill install:
+  // any of that would corrupt the stdout contract Claude Code parses.
+  if (command === 'hook' && hookAction === 'run') {
+    let raw = '';
+    try { raw = readFileSync(0, 'utf-8'); } catch { raw = ''; }
+    let payload: StopHookPayload = {};
+    try { payload = JSON.parse(raw) as StopHookPayload; } catch { payload = {}; }
+    const output = runAmbientHook(payload);
+    if (output) process.stdout.write(output + '\n');
+    return;
+  }
+
+  if (command === 'hook') {
+    if (hookAction === 'enable') {
+      const { alreadyEnabled, command: cmd } = enableHook();
+      console.log('');
+      console.log(chalk.green('✓') + ' Ambient hook ' + (alreadyEnabled ? 'already enabled.' : 'enabled.'));
+      console.log(chalk.dim('  Runs entirely locally — no network calls, no data leaves your machine.'));
+      console.log(chalk.dim('  Fires at most once per session, after the 3rd exchange, and only when'));
+      console.log(chalk.dim('  there\'s something worth flagging (a correction, a run of vague prompts).'));
+      console.log(chalk.dim('  Command: ') + chalk.white(cmd));
+      console.log(chalk.dim('  Disable any time: ') + chalk.white('npx cortext hook disable'));
+      console.log('');
+    } else if (hookAction === 'disable') {
+      const { wasEnabled } = disableHook();
+      console.log('');
+      console.log(wasEnabled ? chalk.green('✓') + ' Ambient hook disabled.' : chalk.dim('Ambient hook was not enabled.'));
+      console.log('');
+    } else {
+      const { enabled, command: cmd } = hookStatus();
+      console.log('');
+      console.log(enabled ? chalk.green('✓') + ' Ambient hook is enabled.' : chalk.dim('Ambient hook is not enabled.'));
+      if (enabled && cmd) console.log(chalk.dim('  Command: ') + chalk.white(cmd));
+      console.log(chalk.dim('  ') + chalk.white(enabled ? 'npx cortext hook disable' : 'npx cortext hook enable'));
+      console.log('');
+    }
+    return;
+  }
 
   // Keep the Claude Code skill in sync with this version — silent, best-effort.
   installSkill();
@@ -535,6 +596,23 @@ async function main(): Promise<void> {
 
   if (shouldWeb) {
     startWebServer(result, worstPromptData, days);
+    return;
+  }
+
+  if (shouldShare) {
+    const topRead = reads?.[0] ?? null;
+    const file = openShareCard({
+      version,
+      days,
+      totalSessions: result.totalSessions,
+      totalPrompts: result.totalPrompts,
+      totalCost: result.totalCost,
+      cacheHitRate: result.cacheHitRate,
+      harnessScore: harnessScore ? harnessScore.overall : null,
+      topRead: topRead ? { text: topRead.text, valence: topRead.valence } : null,
+      goalLabel: goal ? goal.label : null,
+    });
+    console.log(chalk.dim('Share card opened in your browser: ') + chalk.white(file));
     return;
   }
 
