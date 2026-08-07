@@ -1,5 +1,15 @@
 # TODOS
 
+## Strategic Direction (2026-08-07)
+
+**Decision:** Dashboard-only focus. Freeze new investment in `goal`/`coach`/`quiz`/`hook`/`--web`/`--share` until the dashboard alone proves retention.
+
+**Why:** cortext has ~270 npm downloads/month (thin, likely mostly self + CI) spread across 19 files / 5,378 lines. The only surface that delivers value with zero setup is the default `npx cortext` dashboard (`analyzer.ts` + `renderer.ts` + `index.ts` default path). Everything else — persona coaching (`goal`, `coach.ts`, `goals.ts`), `quiz`, `hook` auto-install, the share server (`server.ts`, 572 lines) — asks the user to adopt an ongoing habit before it pays off, and none of it has usage signal behind it. Claude Code's own `/insights` and `/usage` are also increasingly commoditizing the stats layer, which sharpens the question of what cortext is actually differentiated on.
+
+**What "frozen" means:** existing code stays, ships, and gets bug fixes — but no new features land in `goal.ts`, `coach.ts`, `quiz.ts`, `hookinstall.ts`, `server.ts`, or `harness.ts` until there's evidence people use the dashboard more than once. All TODO items below that extend those subsystems (persona coaching v2 work) are deferred under this freeze, not cancelled.
+
+**Unfreeze condition:** instrument the dashboard to see repeat usage (e.g. does a user run `npx cortext` more than once in 14 days), or get direct signal from real users that the coaching/persona layer is wanted. Revisit this note when that data exists.
+
 ## Harness Health v2
 
 ### TODO-1: Per-session tool namespace average for behavioral scoring
