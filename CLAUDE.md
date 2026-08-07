@@ -2,11 +2,6 @@
 
 Claude Code prompt analytics CLI. Reads `~/.claude/projects/` JSONL, computes token/cost stats, renders a TUI dashboard.
 
-## Commands
-- `npm run build` — esbuild bundle → `dist/index.js`
-- `npm run dev` — run via tsx (no build step)
-- `npm test` — vitest
-
 ## Source of truth for new features
 
 IMPORTANT: https://code.claude.com/docs/en/best-practices is the authoritative reference for what Claude Code users actually need. Before designing any new feature, check whether the docs describe a pattern, pain point, or workflow that the feature should address. New features should map to documented best practices — not hypothetical ones.
